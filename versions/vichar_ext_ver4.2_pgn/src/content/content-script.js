@@ -386,6 +386,11 @@ function captureCurrentPosition() {
     }, (response) => {
       console.log("Capture response:", response);
       
+      // Add logging to verify the FEN
+      chrome.storage.local.get(['capturedBoard'], (result) => {
+        console.log("CAPTURED FEN:", result.capturedBoard?.fen);
+      });
+      
       if (chrome.runtime.lastError) {
         console.error("Runtime error:", chrome.runtime.lastError);
         if (responseArea) {
@@ -497,6 +502,9 @@ function formatAPIResponse(response) {
 // Function to call the backend API
 async function callAnalysisAPI(question, capturedBoard) {
   try {
+    // Log the FEN being sent to API
+    console.log("Sending to API - FEN:", capturedBoard.fen);
+    
     // Prepare chat history (this could be extended to maintain conversation)
     const chatHistory = [
       { text: question, sender: "user" }
