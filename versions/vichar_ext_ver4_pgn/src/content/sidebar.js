@@ -1,6 +1,12 @@
 // Standalone sidebar module for chess position analysis
 console.log("Chess Analysis Sidebar module loaded");
 
+// API configuration - change this to match your deployment
+const API_URL = "http://localhost:8000"; // Update this to your FastAPI server address
+
+// Export the sidebar instance for use in the content script
+let sidebarInstance;
+
 // Class to handle the sidebar functionality
 class ChessAnalysisSidebar {
   constructor() {
@@ -10,6 +16,7 @@ class ChessAnalysisSidebar {
     this.questionInput = null;
     this.responseArea = null;
     this.capturedBoard = null;
+    this.chatHistory = []; // Store chat history for context
     
     // Initialize immediately
     this.initialize();
@@ -35,7 +42,17 @@ class ChessAnalysisSidebar {
     if (!this.sidebarElement) {
       this.createSidebarElement();
     }
-    
+}
+
+// Initialize the sidebar
+sidebarInstance = new ChessAnalysisSidebar();
+
+// Export the sidebar instance
+export { sidebarInstance };
+
+// Make it available globally for debugging
+window.chessAnalysisSidebar = sidebarInstance;
+
     // Load any stored board data
     this.loadStoredBoardData();
   }
@@ -149,6 +166,100 @@ class ChessAnalysisSidebar {
     `;
     imageContainer.appendChild(this.capturedImageElement);
     
+    // Game info container (for FEN and PGN)
+    const gameInfoContainer = document.createElement('div');
+    gameInfoContainer.id = 'game-info-container';
+    gameInfoContainer.style.cssText = `
+      width: 100%;
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    `;
+    
+    // FEN display
+    const fenContainer = document.createElement('div');
+    fenContainer.style.cssText = `
+      font-family: monospace;
+      font-size: 12px;
+      word-break: break-all;
+      background-color: #fff;
+      padding: 6px;
+      border-radius: 3px;
+      border: 1px solid #e0e0e0;
+    `;
+    const fenLabel = document.createElement('div');
+    fenLabel.textContent = 'FEN:';
+    fenLabel.style.fontWeight = 'bold';
+    fenLabel.style.marginBottom = '3px';
+    const fenValue = document.createElement('div');
+    fenValue.id = 'fen-value';
+    fenValue.textContent = '';
+    fenContainer.appendChild(fenLabel);
+    fenContainer.appendChild(fenValue);
+    
+    // PGN display (collapsible)
+    const pgnContainer = document.createElement('div');
+    pgnContainer.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    `;
+    
+    const pgnHeader = document.createElement('div');
+    pgnHeader.style.cssText = `
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      padding: 6px;
+      background-color: #e9e9e9;
+      border-radius: 3px;
+    `;
+    
+    const pgnLabel = document.createElement('div');
+    pgnLabel.textContent = 'PGN (Game Moves)';
+    pgnLabel.style.fontWeight = 'bold';
+    
+    const pgnToggle = document.createElement('span');
+    pgnToggle.textContent = '▼';
+    pgnToggle.style.transition = 'transform 0.3s';
+    
+    pgnHeader.appendChild(pgnLabel);
+    pgnHeader.appendChild(pgnToggle);
+    
+    const pgnContent = document.createElement('div');
+    pgnContent.id = 'pgn-value';
+    pgnContent.style.cssText = `
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background-color: #fff;
+      padding: 6px;
+      border-radius: 3px;
+      border: 1px solid #e0e0e0;
+      max-height: 150px;
+      overflow-y: auto;
+      display: none;
+    `;
+    
+    // Toggle PGN visibility when header is clicked
+    pgnHeader.addEventListener('click', () => {
+      const isVisible = pgnContent.style.display !== 'none';
+      pgnContent.style.display = isVisible ? 'none' : 'block';
+      pgnToggle.style.transform = isVisible ? 'rotate(0deg)' : 'rotate(180deg)';
+    });
+    
+    pgnContainer.appendChild(pgnHeader);
+    pgnContainer.appendChild(pgnContent);
+    
+    // Add components to the game info container
+    gameInfoContainer.appendChild(fenContainer);
+    gameInfoContainer.appendChild(pgnContainer);
+    
     // Question input
     const questionContainer = document.createElement('div');
     questionContainer.style.cssText = `
@@ -223,6 +334,7 @@ class ChessAnalysisSidebar {
     content.appendChild(header);
     content.appendChild(captureButton);
     content.appendChild(imageContainer);
+    content.appendChild(gameInfoContainer);
     content.appendChild(questionContainer);
     content.appendChild(responseContainer);
     
@@ -256,7 +368,6 @@ class ChessAnalysisSidebar {
     
     try {
       // Send a message to the background script to capture the board
-      // We use the messaging API which works with both extension contexts
       chrome.runtime.sendMessage({ 
         action: "captureBoardForSidebar"
       }, (response) => {
@@ -270,7 +381,10 @@ class ChessAnalysisSidebar {
         
         if (response && response.success) {
           // The background script will tell the content script to update the image
+          this.loadStoredBoardData();
           this.responseArea.textContent = 'Position captured! Ask a question about this position.';
+          // Reset chat history when capturing a new position
+          this.chatHistory = [];
         } else {
           const errorMsg = response && response.error ? response.error : 'Unknown error';
           this.responseArea.textContent = 'Error capturing position: ' + errorMsg;
@@ -291,11 +405,46 @@ class ChessAnalysisSidebar {
         
         if (this.capturedBoard && this.capturedBoard.imageData) {
           console.log("Loaded stored board data");
+          console.log("FEN data:", this.capturedBoard.fen);
+          console.log("PGN data:", this.capturedBoard.pgn ? "Available" : "Not available");
+          
+          // Update the image
           this.capturedImageElement.src = this.capturedBoard.imageData;
           this.capturedImageElement.style.display = 'block';
+          
+          // Update game info if available
+          const gameInfoContainer = document.getElementById('game-info-container');
+          const fenValue = document.getElementById('fen-value');
+          const pgnValue = document.getElementById('pgn-value');
+          
+          if (gameInfoContainer) {
+            gameInfoContainer.style.display = 'flex';
+            
+            // Update FEN
+            if (fenValue && this.capturedBoard.fen) {
+              fenValue.textContent = this.capturedBoard.fen;
+            }
+            
+            // Update PGN
+            if (pgnValue) {
+              if (this.capturedBoard.pgn && this.capturedBoard.pgn.trim().length > 0) {
+                pgnValue.textContent = this.capturedBoard.pgn;
+                pgnValue.style.display = 'block';
+              } else {
+                pgnValue.textContent = "No move history available";
+                pgnValue.style.display = 'block';
+              }
+            }
+          }
         } else {
           console.log("No stored board data found");
           this.capturedImageElement.style.display = 'none';
+          
+          const gameInfoContainer = document.getElementById('game-info-container');
+          if (gameInfoContainer) {
+            gameInfoContainer.style.display = 'none';
+          }
+          
           this.responseArea.textContent = 'Capture a position to begin analysis.';
         }
       });
@@ -321,51 +470,63 @@ class ChessAnalysisSidebar {
     this.responseArea.textContent = "Analyzing position...";
     
     try {
-      // In a real implementation, this would call an API
-      const response = await this.getAIResponse(question, this.capturedBoard);
+      // Add the user's question to chat history
+      this.chatHistory.push({
+        text: question,
+        sender: "user"
+      });
+      
+      // Call the API
+      const response = await this.callAnalysisAPI(question, this.capturedBoard);
+      
+      // Add the assistant's response to chat history
+      this.chatHistory.push({
+        text: response,
+        sender: "assistant"
+      });
+      
       this.responseArea.textContent = response;
     } catch (error) {
       console.error("Error getting response:", error);
-      this.responseArea.textContent = "Sorry, there was an error analyzing this position.";
+      this.responseArea.textContent = "Sorry, there was an error analyzing this position: " + error.message;
     }
   }
   
-  // Get AI response (simulated for now)
-  async getAIResponse(question, capturedBoard) {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Simple keyword matching to generate responses
-    const questionLower = question.toLowerCase();
-    
-    // For the starting position
-    if (capturedBoard.fen.includes("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR")) {
-      if (questionLower.includes("best move") || questionLower.includes("good move")) {
-        return "In the starting position, common strong opening moves include 1.e4, 1.d4, 1.c4, or 1.Nf3. These moves fight for central control and develop pieces.";
-      } 
-      else if (questionLower.includes("strategy") || questionLower.includes("plan")) {
-        return "The main strategic goals in the opening are: 1) Control the center with pawns or pieces, 2) Develop your pieces quickly, 3) Castle early to protect your king, and 4) Connect your rooks.";
+  // Call the analysis API
+  async callAnalysisAPI(question, capturedBoard) {
+    try {
+      console.log("Calling analysis API with FEN:", capturedBoard.fen);
+      
+      // Format request data
+      const requestData = {
+        message: question,
+        fen: capturedBoard.fen,
+        pgn: capturedBoard.pgn || null,
+        chat_history: this.chatHistory
+      };
+      
+      console.log("Sending API request:", requestData);
+      
+      // Call the API endpoint
+      const response = await fetch(`${API_URL}/analysis`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API response error: ${response.status} ${response.statusText} - ${errorText}`);
       }
+      
+      const data = await response.json();
+      console.log("API response:", data);
+      
+      return data.response;
+    } catch (error) {
+      console.error("API call error:", error);
+      throw error;
     }
-    
-    // Generic responses for any position
-    if (questionLower.includes("best move") || questionLower.includes("good move")) {
-      return "To identify the best move, I would consider: 1) Piece activity and development, 2) Center control, 3) King safety, 4) Material balance, and 5) Tactical opportunities. Without a full analysis, I'd need to evaluate the specific position in more detail.";
-    }
-    else if (questionLower.includes("winning") || questionLower.includes("advantage")) {
-      return "To determine who's winning, I'd evaluate: material balance, piece activity, king safety, pawn structure, and control of key squares. A thorough analysis would require deeper calculation of specific variations.";
-    }
-    else if (questionLower.includes("tactic") || questionLower.includes("combination")) {
-      return "Look for tactical opportunities like forks, pins, skewers, discovered attacks, or potential sacrifices. Check if any pieces are undefended or if there are weaknesses around either king.";
-    }
-    
-    // Default response
-    return "To provide a detailed answer about this chess position, I'd need to analyze the specific arrangement of pieces, control of key squares, material balance, and potential threats. Consider factors like piece development, king safety, and pawn structure when evaluating chess positions.";
   }
-}
-
-// Initialize the sidebar
-const sidebarInstance = new ChessAnalysisSidebar();
-
-// Make it available globally for debugging
-window.chessAnalysisSidebar = sidebarInstance;

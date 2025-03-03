@@ -5,6 +5,9 @@ console.log("Chess analyzer content script loader initialized");
 let sidebarInitialized = false;
 let sidebarVisible = false;
 
+// API configuration - change this to match your deployment
+const API_URL = "http://localhost:8000"; // Update this to your FastAPI server address
+
 // Function to create and initialize the sidebar
 function initializeSidebar() {
   if (sidebarInitialized) {
@@ -451,68 +454,48 @@ async function askQuestion() {
     responseArea.textContent = "Analyzing position...";
     
     try {
-      // In a real implementation, this would call an AI API
-      const response = await getAIResponse(question, capturedBoard);
+      // Call the API with the question and board position
+      const response = await callAnalysisAPI(question, capturedBoard);
       responseArea.textContent = response;
     } catch (error) {
       console.error("Error getting response:", error);
-      responseArea.textContent = "Sorry, there was an error analyzing this position.";
+      responseArea.textContent = "Sorry, there was an error analyzing this position: " + error.message;
     }
   });
 }
 
-// Function to get AI response (simulated for now)
-async function getAIResponse(question, capturedBoard) {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  // Get the PGN and FEN for context
-  const pgn = capturedBoard.pgn || '';
-  const fen = capturedBoard.fen || '';
-  const hasMoveHistory = pgn.length > 0;
-  
-  console.log("Generating response with PGN:", pgn ? "Available" : "Not available");
-  console.log("FEN:", fen);
-  
-  // Simple keyword matching to generate responses
-  const questionLower = question.toLowerCase();
-  
-  // For the starting position
-  if (fen.includes("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR")) {
-    if (questionLower.includes("best move") || questionLower.includes("good move")) {
-      return "In the starting position, common strong opening moves include 1.e4, 1.d4, 1.c4, or 1.Nf3. These moves fight for central control and develop pieces.";
-    } 
-    else if (questionLower.includes("strategy") || questionLower.includes("plan")) {
-      return "The main strategic goals in the opening are: 1) Control the center with pawns or pieces, 2) Develop your pieces quickly, 3) Castle early to protect your king, and 4) Connect your rooks.";
-    }
-  }
-  
-  // If we have PGN/move history, include that context in responses
-  if (hasMoveHistory) {
-    if (questionLower.includes("what happened") || questionLower.includes("what moves") || questionLower.includes("move history")) {
-      return `The game progressed with these moves: ${pgn}`;
+// Function to call the backend API
+async function callAnalysisAPI(question, capturedBoard) {
+  try {
+    // Prepare chat history (this could be extended to maintain conversation)
+    const chatHistory = [
+      { text: question, sender: "user" }
+    ];
+    
+    // Call our Python API
+    const response = await fetch(`${API_URL}/analysis`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: question,
+        fen: capturedBoard.fen,
+        pgn: capturedBoard.pgn,
+        chat_history: chatHistory
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API response error: ${response.status} ${response.statusText}`);
     }
     
-    if (questionLower.includes("best move") || questionLower.includes("good move")) {
-      return `Based on the move history: ${pgn.length > 100 ? pgn.substring(0, 100) + "..." : pgn}\n\nTo identify the best move, I'd consider the current position, the previous moves, and potential tactics. The position appears to be ${fen.includes('w') ? 'White' : 'Black'} to move. I'd analyze piece activity, center control, and material balance before suggesting the optimal continuation.`;
-    }
+    const data = await response.json();
+    return data.response;
+  } catch (error) {
+    console.error("API call error:", error);
+    throw error;
   }
-  
-  // Generic responses for any position
-  if (questionLower.includes("best move") || questionLower.includes("good move")) {
-    return "To identify the best move, I would consider: 1) Piece activity and development, 2) Center control, 3) King safety, 4) Material balance, and 5) Tactical opportunities. Without a full analysis, I'd need to evaluate the specific position in more detail.";
-  }
-  else if (questionLower.includes("winning") || questionLower.includes("advantage")) {
-    return "To determine who's winning, I'd evaluate: material balance, piece activity, king safety, pawn structure, and control of key squares. A thorough analysis would require deeper calculation of specific variations.";
-  }
-  else if (questionLower.includes("tactic") || questionLower.includes("combination")) {
-    return "Look for tactical opportunities like forks, pins, skewers, discovered attacks, or potential sacrifices. Check if any pieces are undefended or if there are weaknesses around either king.";
-  }
-  
-  // Default response
-  return "To provide a detailed answer about this chess position" + 
-         (hasMoveHistory ? " and its move history" : "") + 
-         ", I'd need to analyze the specific arrangement of pieces, control of key squares, material balance, and potential threats. Consider factors like piece development, king safety, and pawn structure when evaluating chess positions.";
 }
 
 // Listen for messages from the popup and background script
