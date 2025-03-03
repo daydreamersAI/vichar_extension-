@@ -15,7 +15,6 @@ load_dotenv()
 
 # Get API key from environment variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_KEY= "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"
 # Or you can use other LLM APIs as preferred
 # ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
