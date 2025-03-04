@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
@@ -8,6 +8,7 @@ import io
 import requests
 import json
 import os
+import base64
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -37,6 +38,7 @@ class ChessAnalysisRequest(BaseModel):
     message: str
     fen: Optional[str] = None
     pgn: Optional[str] = None
+    image_data: Optional[str] = None  # Base64 encoded image data
     chat_history: Optional[List[Message]] = []
 
 class ChessAnalysisResponse(BaseModel):
@@ -87,8 +89,15 @@ async def analyze_position(request: ChessAnalysisRequest):
                 sender = "User" if message.sender == "user" else "Assistant"
                 chat_context += f"{sender}: {message.text}\n"
         
-        # Prepare the prompt for the LLM
-        prompt = f"""
+        # Determine if we should use vision model based on image availability
+        use_vision = request.image_data is not None and len(request.image_data) > 0
+        
+        # Call the appropriate LLM API based on whether we have an image
+        if use_vision:
+            response = call_vision_api(request.message, request.image_data, request.fen, game_analysis, chat_context)
+        else:
+            # Prepare the prompt for the regular LLM
+            prompt = f"""
 You are a chess analysis assistant. The user has sent the following message:
 "{request.message}"
 
@@ -101,9 +110,7 @@ Previous conversation:
 
 Provide a brief helpful analysis or response to the user's message.
 """
-        
-        # Call external LLM API with the prompt
-        response = call_llm_api(prompt)
+            response = call_llm_api(prompt)
         
         return {"response": response}
     
@@ -150,6 +157,83 @@ def call_llm_api(prompt: str) -> str:
     except Exception as e:
         print(f"Error calling LLM API: {str(e)}")
         return "I'm having trouble connecting to my analysis engine. Please try again later."
+
+def call_vision_api(user_message: str, image_data: str, fen: Optional[str], game_analysis: str, chat_context: str) -> str:
+    """
+    Call GPT-4o Vision API with image and message.
+    """
+    if not OPENAI_API_KEY:
+        return "I'm unable to analyze this position right now. Please check your API configuration."
+    
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {OPENAI_API_KEY}"
+        }
+        
+        # Format the system message with FEN and game information if available
+        system_message = "You are a chess assistant that provides helpful analysis based on chess board images."
+        
+        if fen or game_analysis:
+            system_message += "\n\nAdditional chess information:\n"
+            if fen:
+                system_message += f"FEN: {fen}\n"
+            if game_analysis:
+                system_message += f"{game_analysis}\n"
+        
+        # Add chat context if available
+        if chat_context:
+            system_message += f"\nPrevious conversation:\n{chat_context}"
+        
+        # Clean the base64 string if needed
+        if image_data.startswith("data:image"):
+            # Extract the actual base64 content
+            image_data = image_data.split(",")[1]
+        
+        # Construct the payload for GPT-4o Vision
+        payload = {
+            "model": "gpt-4o",  # Use GPT-4o for vision capabilities
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_message
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Here is a chess board image. Please analyze it based on this request: {user_message}"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_data}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+        
+        # Call the OpenAI API
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            print(f"Vision API Error: {response.status_code} - {response.text}")
+            return f"Sorry, I encountered an error while analyzing the image. Status code: {response.status_code}"
+    
+    except Exception as e:
+        print(f"Error calling Vision API: {str(e)}")
+        return f"I'm having trouble analyzing the chess board image: {str(e)}"
 
 # Alternative implementation for Anthropic's Claude API
 def call_anthropic_api(prompt: str) -> str:
