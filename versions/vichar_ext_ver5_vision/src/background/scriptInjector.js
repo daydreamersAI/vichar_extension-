@@ -1,3 +1,40 @@
+// This script injects capture functionality dynamically when needed
+console.log("Script injector initialized");
+
+// Function to inject the capture script when needed
+async function injectCaptureScript(tabId) {
+  console.log("Injecting capture script into tab:", tabId);
+  
+  try {
+    // First inject html2canvas
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['lib/html2canvas.min.js']
+    });
+    
+    console.log("html2canvas injected successfully");
+    
+    // Then inject the capture code
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: captureChessBoard
+    });
+    
+    console.log("Capture script result:", result);
+    
+    if (result && result[0] && result[0].result) {
+      // Process the captured image data
+      await processChessboardImage(result[0].result);
+      return { success: true };
+    } else {
+      throw new Error("Failed to capture chess board");
+    }
+  } catch (error) {
+    console.error("Error injecting capture script:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 // Process the captured chessboard image
 async function processChessboardImage(captureResult) {
   if (!captureResult) {
@@ -33,44 +70,6 @@ async function processChessboardImage(captureResult) {
   } catch (error) {
     console.error("Error storing chess position:", error);
     throw error;
-  }
-}
-
-// Export the function for use in other modules
-export { injectCaptureScript };// This script injects capture functionality dynamically when needed
-console.log("Script injector initialized");
-
-// Function to inject the capture script when needed
-async function injectCaptureScript(tabId) {
-  console.log("Injecting capture script into tab:", tabId);
-  
-  try {
-    // First inject html2canvas
-    await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      files: ['lib/html2canvas.min.js']
-    });
-    
-    console.log("html2canvas injected successfully");
-    
-    // Then inject the capture code
-    const result = await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      func: captureChessBoard
-    });
-    
-    console.log("Capture script result:", result);
-    
-    if (result && result[0] && result[0].result) {
-      // Process the captured image data
-      await processChessboardImage(result[0].result);
-      return { success: true };
-    } else {
-      throw new Error("Failed to capture chess board");
-    }
-  } catch (error) {
-    console.error("Error injecting capture script:", error);
-    return { success: false, error: error.message };
   }
 }
 
@@ -381,6 +380,41 @@ function captureChessBoard() {
     }
   }
 
+  // Helper function to validate FEN string format
+  function isValidFENFormat(fen) {
+    if (!fen || typeof fen !== 'string') return false;
+    
+    // Basic FEN validation - checks for the expected structure
+    // A proper FEN has 6 fields separated by spaces
+    const fields = fen.trim().split(/\s+/);
+    
+    // Most basic check - does it have the right format with ranks separated by slashes?
+    if (!fen.includes('/')) return false;
+    
+    // Check if it has at least some minimum components of a FEN
+    if (fields.length >= 1) {
+      // Check the board position field (1st field)
+      const ranks = fields[0].split('/');
+      if (ranks.length !== 8) return false;
+      
+      // Additional validation if we have more fields
+      if (fields.length >= 2) {
+        // Check active color (2nd field)
+        if (!['w', 'b'].includes(fields[1])) return false;
+        
+        // If we have the castling field (3rd), check it contains only K, Q, k, q, or -
+        if (fields.length >= 3 && !/^[KQkq-]+$/.test(fields[2])) return false;
+        
+        // If we have the en passant square (4th), check it's valid
+        if (fields.length >= 4 && fields[3] !== '-' && !/^[a-h][36]$/.test(fields[3])) return false;
+      }
+      
+      return true;
+    }
+    
+    return false;
+  }
+
   // Function to extract FEN from Lichess - Enhanced version
   function extractLichessFEN() {
     console.log("Extracting FEN from Lichess using enhanced methods");
@@ -672,41 +706,6 @@ function captureChessBoard() {
     return "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   }
   
-  // Helper function to validate FEN string format
-  function isValidFENFormat(fen) {
-    if (!fen || typeof fen !== 'string') return false;
-    
-    // Basic FEN validation - checks for the expected structure
-    // A proper FEN has 6 fields separated by spaces
-    const fields = fen.trim().split(/\s+/);
-    
-    // Most basic check - does it have the right format with ranks separated by slashes?
-    if (!fen.includes('/')) return false;
-    
-    // Check if it has at least some minimum components of a FEN
-    if (fields.length >= 1) {
-      // Check the board position field (1st field)
-      const ranks = fields[0].split('/');
-      if (ranks.length !== 8) return false;
-      
-      // Additional validation if we have more fields
-      if (fields.length >= 2) {
-        // Check active color (2nd field)
-        if (!['w', 'b'].includes(fields[1])) return false;
-        
-        // If we have the castling field (3rd), check it contains only K, Q, k, q, or -
-        if (fields.length >= 3 && !/^[KQkq-]+$/.test(fields[2])) return false;
-        
-        // If we have the en passant square (4th), check it's valid
-        if (fields.length >= 4 && fields[3] !== '-' && !/^[a-h][36]$/.test(fields[3])) return false;
-      }
-      
-      return true;
-    }
-    
-    return false;
-  }
-  
   // Function to capture board on Lichess with enhanced quality
   async function captureLichessBoard(pgn) {
     console.log("Capturing Lichess board with enhanced method");
@@ -881,3 +880,98 @@ function captureChessBoard() {
       }
     });
   }
+  
+  // Function to capture board on Chess.com
+  async function captureChessComBoard(pgn) {
+    console.log("Capturing Chess.com board");
+    
+    // Chess.com-specific selectors, ordered by preference
+    const selectors = [
+      '.board-container', // Common board container
+      '.board', // Direct board element
+      '.chessboard', // Alternative board name
+      'chess-board', // Custom element on newer versions
+      'wc-chess-board', // Another custom element
+      '#board', // Board by ID
+      '#chess_com_chessboard_1', // Specific board ID
+      '.board-component-container', // Component container
+      '.board-layout-component' // Layout container
+    ];
+    
+    // Try each selector
+    let boardElement = null;
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        console.log(`Found Chess.com board with selector: ${selector}`);
+        boardElement = element;
+        break;
+      }
+    }
+    
+    if (!boardElement) {
+      console.error("Could not find Chess.com board with any selector");
+      throw new Error("Chess board element not found on Chess.com");
+    }
+    
+    // Try to get the FEN position using enhanced extraction
+    let fen = extractChessComFEN();
+    console.log("Extracted FEN from Chess.com:", fen);
+    
+    // Determine board orientation
+    let orientation = "white";
+    const isFlipped = boardElement.classList.contains('flipped') || 
+                      document.querySelector('.flip-board.flipped');
+    if (isFlipped) {
+      orientation = "black";
+    }
+    
+    // Special handling for chess-board custom element
+    if (boardElement.tagName === 'CHESS-BOARD') {
+      console.log("Found chess-board custom element");
+      // If it has shadow DOM, we need to handle differently
+      if (boardElement.shadowRoot) {
+        console.log("Shadow DOM detected, using parent element");
+        // Instead of trying to penetrate shadow DOM, use the parent
+        const parent = boardElement.parentElement;
+        if (parent) {
+          boardElement = parent;
+        }
+      }
+    }
+    
+    // Use html2canvas with specific options for Chess.com
+    return new Promise((resolve, reject) => {
+      try {
+        html2canvas(boardElement, {
+          backgroundColor: null,
+          logging: true,
+          useCORS: true,
+          allowTaint: true,
+          scale: 1.5 // Good quality for Chess.com
+        }).then(canvas => {
+          console.log("Chess.com board captured successfully");
+          const imageData = canvas.toDataURL('image/png');
+          
+          // Return both the image and metadata
+          resolve({
+            imageData,
+            pgn,
+            fen,
+            orientation,
+            site: 'chess.com'
+          });
+        }).catch(error => {
+          console.error("html2canvas error on Chess.com:", error);
+          reject(error);
+        });
+      } catch (error) {
+        console.error("Capture error on Chess.com:", error);
+        reject(error);
+      }
+    });
+  }
+}
+
+// Export the function for use in other modules
+export { injectCaptureScript };
