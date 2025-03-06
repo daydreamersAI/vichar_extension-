@@ -9,7 +9,6 @@ let sidebarInitialized = false;
 let sidebarVisible = false;
 
 // API configuration - updated to match your deployment
-// const API_URL = "http://3.110.56.95"; // Updated API server address
 const API_URL = "https://api.beekayprecision.com"; // Updated API server address
 
 // Function to create and initialize the sidebar
@@ -404,7 +403,7 @@ function toggleSidebar() {
   console.log("Sidebar visibility toggled:", sidebarVisible);
 }
 
-// Function to capture the current chess position
+// Function to capture the current chess position - FIXED
 function captureCurrentPosition() {
   console.log("Capturing current position for sidebar");
   const responseArea = document.getElementById('response-area');
@@ -414,24 +413,24 @@ function captureCurrentPosition() {
   
   try {
     // Send a message to the background script to handle the capture
-    // The background script has access to the tabs API
     chrome.runtime.sendMessage({ 
       action: "captureBoardForSidebar"
     }, (response) => {
+      // Immediately check for runtime errors
+      if (chrome.runtime.lastError) {
+        console.error("Runtime error in capture:", chrome.runtime.lastError);
+        if (responseArea) {
+          responseArea.textContent = 'Error: ' + chrome.runtime.lastError.message;
+        }
+        return;
+      }
+      
       console.log("Capture response:", response);
       
       // Add logging to verify the FEN
       chrome.storage.local.get(['capturedBoard'], (result) => {
         console.log("CAPTURED FEN:", result.capturedBoard?.fen);
       });
-      
-      if (chrome.runtime.lastError) {
-        console.error("Runtime error:", chrome.runtime.lastError);
-        if (responseArea) {
-          responseArea.textContent = 'Error: ' + chrome.runtime.lastError.message;
-        }
-        return;
-      }
       
       if (response && response.success) {
         // Load the newly captured board
@@ -464,8 +463,8 @@ function getBase64FromImageSrc(src) {
   return null;
 }
 
-// Function to ask a question about the position
-async function askQuestion() {
+// Function to ask a question about the position - FIXED
+function askQuestion() {
   const questionInput = document.getElementById('question-input');
   const responseArea = document.getElementById('response-area');
   const aiVisionToggle = document.getElementById('ai-vision-toggle');
@@ -482,8 +481,23 @@ async function askQuestion() {
     return;
   }
   
+  // Show loading indicator
+  responseArea.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: center; height: 100px;">
+      <div style="display: inline-block; border-radius: 50%; border: 3px solid #4285f4; 
+           border-top-color: transparent; width: 24px; height: 24px; animation: spin 1s linear infinite;"></div>
+      <div style="margin-left: 15px; font-weight: 500;">Analyzing position...</div>
+    </div>
+    <style>
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  `;
+  
   // Check if we have a captured board
-  chrome.storage.local.get(['capturedBoard'], async (result) => {
+  chrome.storage.local.get(['capturedBoard'], (result) => {
     const capturedBoard = result.capturedBoard;
     
     if (!capturedBoard) {
@@ -491,67 +505,46 @@ async function askQuestion() {
       return;
     }
     
-    responseArea.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: center; height: 100px;">
-        <div style="display: inline-block; border-radius: 50%; border: 3px solid #4285f4; 
-             border-top-color: transparent; width: 24px; height: 24px; animation: spin 1s linear infinite;"></div>
-        <div style="margin-left: 15px; font-weight: 500;">Analyzing position...</div>
-      </div>
-      <style>
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      </style>
-    `;
+    // Determine if we should use vision
+    const useVision = aiVisionToggle && aiVisionToggle.checked;
     
+    // Send request to background script to handle API call
     try {
-      // Extract base64 image data if AI vision is enabled
-      let imageData = null;
-      // For testing, temporarily disable image data
-      if (aiVisionToggle && aiVisionToggle.checked) {
-        console.log("AI Vision enabled, extracting image data");
-        imageData = getBase64FromImageSrc(capturedBoard.imageData);
-        
-        // Print the length of the image data to see if it's reasonable
-        if (imageData) {
-          console.log("Image data length:", imageData.length);
-          // If the image data is very large, it might be causing issues
-          if (imageData.length > 500000) {
-            console.warn("Image data is very large, this might cause issues");
-            // For very large images, you might want to truncate or disable
-            console.log("Using XMLHttpRequest due to large image size");
-          }
+      chrome.runtime.sendMessage({
+        action: "analyzeChessPosition",
+        question: question,
+        capturedBoard: capturedBoard,
+        useVision: useVision
+      }, (response) => {
+        // Immediately check for runtime errors
+        if (chrome.runtime.lastError) {
+          console.error("Runtime error in analysis:", chrome.runtime.lastError);
+          responseArea.innerHTML = `
+            <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+              <strong>Error:</strong> ${chrome.runtime.lastError.message}
+            </div>
+          `;
+          return;
         }
-      }
-      
-      // Use XMLHttpRequest instead of fetch for better compatibility
-      try {
-        // Call the API using XMLHttpRequest
-        const response = await callAnalysisAPIWithXHR(question, capturedBoard, imageData);
         
-        // Format the response with better styling
-        const formattedResponse = formatAPIResponse(response);
-        responseArea.innerHTML = formattedResponse;
-      } catch (xhrError) {
-        console.error("XMLHttpRequest failed, trying without image:", xhrError);
-        
-        // If XMLHttpRequest with image fails, try again without image
-        try {
-          const response = await callAnalysisAPIWithXHR(question, capturedBoard, null);
-          const formattedResponse = formatAPIResponse(response);
+        if (response && response.success) {
+          // Format the response with better styling
+          const formattedResponse = formatAPIResponse(response.data);
           responseArea.innerHTML = formattedResponse;
-        } catch (fallbackError) {
-          throw new Error(`API call failed with and without image: ${fallbackError.message}`);
+        } else {
+          responseArea.innerHTML = `
+            <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+              <strong>Error:</strong> ${response?.error || "Failed to analyze position"}
+            </div>
+          `;
         }
-      }
+      });
     } catch (error) {
-      console.error("Error getting response:", error);
+      console.error("Error sending analysis message:", error);
       responseArea.innerHTML = `
-        <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px; margin-bottom: 10px;">
-          <strong>Error:</strong> There was a problem analyzing this position.
+        <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+          <strong>Error:</strong> ${error.message}
         </div>
-        <div>${error.message}</div>
       `;
     }
   });
@@ -772,38 +765,66 @@ async function loadStoredBoardData() {
   }
 }
 
+// FIXED MESSAGE LISTENER - Add ping handler and improve response handling
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log("Content script received message:", request);
+  
+  // Add ping handler for extension health check
+  if (request.action === "ping") {
+    console.log("Ping received, responding immediately");
+    sendResponse({ success: true });
+    return true;
+  }
+  
+  if (request.action === "showSidebar") {
+    console.log("Show sidebar request received");
+    
+    try {
+      // Initialize the sidebar if not already done
+      if (!sidebarInitialized) {
+        initializeSidebar();
+      }
+      
+      // Show the sidebar
+      sidebarVisible = true;
+      const sidebar = document.getElementById('chess-analysis-sidebar');
+      if (sidebar) {
+        sidebar.style.right = '0';
+        console.log("Sidebar displayed");
+      } else {
+        console.error("Sidebar element not found");
+      }
+      
+      // Send response immediately
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error("Error showing sidebar:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+    
+    return true; // Keep the message channel open
+  }
+  
+  if (request.action === "updateSidebarImage") {
+    console.log("Update sidebar image request received");
+    
+    try {
+      loadStoredBoardData();
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error("Error updating sidebar image:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+    
+    return true; // Keep the message channel open
+  }
+});
+
 // Initialize the sidebar when the content script loads
 // But wait for the page to be fully loaded first
 document.addEventListener('DOMContentLoaded', () => {
   console.log("DOM loaded, initializing sidebar");
   initializeSidebar();
-});
-
-// Listen for messages from the background script or popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("Content script received message:", request);
-  
-  if (request.action === "showSidebar") {
-    console.log("Show sidebar request received");
-    
-    // Initialize the sidebar if not already done
-    if (!sidebarInitialized) {
-      initializeSidebar();
-    }
-    
-    // Show the sidebar
-    toggleSidebar();
-    
-    sendResponse({ success: true });
-    return true;
-  }
-  
-  if (request.action === "updateSidebarImage") {
-    console.log("Update sidebar image request received");
-    loadStoredBoardData();
-    sendResponse({ success: true });
-    return true;
-  }
 });
 
 // If the page is already loaded, initialize immediately
@@ -945,7 +966,7 @@ function checkSSLCertificate() {
     const securityInfo = window.performance && 
                          window.performance.getEntriesByType && 
                          window.performance.getEntriesByType("resource").find(r => 
-                           r.name.includes("3.110.56.95")
+                           r.name.includes("api.beekayprecision.com")
                          );
     
     if (securityInfo) {
