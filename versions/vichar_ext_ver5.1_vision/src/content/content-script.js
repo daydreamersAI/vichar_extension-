@@ -10,7 +10,7 @@ let sidebarVisible = false;
 
 // API configuration - updated to match your deployment
 // const API_URL = "http://3.110.56.95"; // Updated API server address
-const API_URL = "https://3.110.56.95"; // Updated API server address
+const API_URL = "https://api.beekayprecision.com"; // Updated API server address
 
 // Function to create and initialize the sidebar
 function initializeSidebar() {
@@ -828,7 +828,7 @@ function testAPIDirectly() {
   
   // Test with fetch first
   console.log("Testing with fetch API...");
-  fetch("https://3.110.56.95/analysis", {
+  fetch("https://api.beekayprecision.com/analysis", {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -861,7 +861,7 @@ function testAPIDirectly() {
   function testWithXHR() {
     console.log("Testing with XMLHttpRequest...");
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', "https://3.110.56.95/analysis", true);
+    xhr.open('POST', "https://api.beekayprecision.com/analysis", true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     
     xhr.onreadystatechange = function() {
@@ -908,7 +908,7 @@ function pingApiServer() {
   console.log("Pinging API server...");
   
   // Try a simple GET request to the root endpoint
-  fetch("https://3.110.56.95/")
+  fetch("https://api.beekayprecision.com/")
     .then(response => {
       console.log("Ping response status:", response.status, response.statusText);
       if (!response.ok) {
@@ -934,7 +934,7 @@ setTimeout(pingApiServer, 1000);
 function checkSSLCertificate() {
   console.log("Checking SSL certificate...");
   
-  fetch("https://3.110.56.95/", {
+  fetch("https://api.beekayprecision.com/", {
     method: 'GET',
     headers: { 'Accept': 'application/json, text/plain, */*' }
   })
@@ -983,7 +983,7 @@ function checkSSLCertificate() {
     };
     
     // Try loading a tiny image from the server to test SSL
-    img.src = "https://3.110.56.95/favicon.ico?" + new Date().getTime();
+    img.src = "https://api.beekayprecision.com/favicon.ico?" + new Date().getTime();
   });
 }
 

@@ -4,7 +4,7 @@
 // Updated to match your deployed FastAPI server
 const API_CONFIG = {
   // Base URL for API access
-  baseUrl: "https://3.110.56.95",
+  baseUrl: "https://api.beekayprecision.com",
   
   // Endpoints
   endpoints: {

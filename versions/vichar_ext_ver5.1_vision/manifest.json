@@ -12,7 +12,7 @@
   "host_permissions": [
     "https://*.lichess.org/*",
     "https://*.chess.com/*",
-    "https://3.110.56.95/*"
+    "https://api.beekayprecision.com/*"
   ],
   "action": {
     "default_popup": "src/popup/popup.html",
@@ -56,6 +56,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://3.110.56.95"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com"
   }
 }
