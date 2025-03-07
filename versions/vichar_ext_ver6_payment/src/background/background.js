@@ -7,6 +7,13 @@ console.log("Background script initialized");
 // API_URL for authenticated endpoints
 const API_URL = "https://api.beekayprecision.com";
 
+// Auth state management
+let authState = {
+  isAuthenticated: false,
+  token: null,
+  user: null
+};
+
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("Background received message:", request);
@@ -253,6 +260,70 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     return true; // Indicates we'll send a response asynchronously
   }
+  
+  // Handle login request from popup
+  if (request.action === "login") {
+    (async () => {
+      try {
+        await initiateGoogleAuth();
+        // Get the updated auth state to send back
+        const data = await chrome.storage.local.get(['userData']);
+        sendResponse({ 
+          success: authState.isAuthenticated, 
+          user: data.userData || null 
+        });
+      } catch (error) {
+        console.error("Login error:", error);
+        sendResponse({ 
+          success: false, 
+          error: error.message || "Authentication failed" 
+        });
+      }
+    })();
+    return true;
+  }
+
+  // Handle logout request
+  if (request.action === "logout") {
+    (async () => {
+      await logout();
+      sendResponse({ success: true });
+    })();
+    return true;
+  }
+
+  // Handle get auth state request
+  if (request.action === "getAuthState") {
+    (async () => {
+      // Refresh auth state check
+      await checkAuthState();
+      sendResponse({ 
+        isAuthenticated: authState.isAuthenticated,
+        user: authState.user
+      });
+    })();
+    return true;
+  }
+  
+  // Handle credits update
+  if (request.action === "credits_updated") {
+    console.log("Credits updated:", request.credits);
+    
+    // Update auth state
+    if (authState.user) {
+      authState.user.credits = request.credits;
+    }
+    
+    // Notify any open extension pages
+    chrome.runtime.sendMessage({
+      action: 'auth_state_changed',
+      isAuthenticated: true,
+      user: authState.user
+    });
+    
+    sendResponse({ success: true });
+    return true;
+  }
 });
 
 // Process the captured chessboard image
@@ -293,6 +364,285 @@ async function processChessboardImage(captureResult) {
   }
 }
 
+// Updated Google Auth function that uses launchWebAuthFlow instead of getAuthToken
+// Direct approach to Google authentication
+// Replace your current initiateGoogleAuth with this much simpler version
+async function initiateGoogleAuth() {
+  const API_URL = "https://api.beekayprecision.com";
+  console.log("Initiating simplified Google Auth...");
+  
+  try {
+    // 1. Get the auth URL from your backend
+    const response = await fetch(`${API_URL}/auth/login/google`);
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+    
+    // 2. Parse the response
+    const responseText = await response.text();
+    let authUrl;
+    
+    try {
+      // Try to parse as JSON
+      const jsonData = JSON.parse(responseText);
+      authUrl = jsonData.url;
+    } catch (e) {
+      // If it's not valid JSON, check if it's a URL itself
+      if (responseText.startsWith('http')) {
+        authUrl = responseText;
+      } else {
+        throw new Error('Invalid response format from server');
+      }
+    }
+    
+    if (!authUrl) {
+      throw new Error('No auth URL found in response');
+    }
+    
+    console.log("Opening auth URL:", authUrl);
+    
+    // 3. Simply open the auth URL in a new tab
+    // This will redirect to your callback page after authentication
+    chrome.tabs.create({ url: authUrl });
+    
+    // 4. Your callback page should handle storing the token
+    // For this to work, make sure your callback page stores the token
+    // in a way that your extension can access it later
+    
+    return { success: true, message: "Auth process started. Please complete login in the new tab." };
+  } catch (error) {
+    console.error("Auth error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Alternative approach using a popup window
+async function initiateGoogleAuthWithPopup() {
+  console.log("Initiating Google Auth with popup...");
+  
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Step 1: Call your backend to get the OAuth URL
+      const response = await fetch(`${API_URL}/auth/login/google`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get auth URL: ${response.status} - ${errorText}`);
+      }
+      
+      const data = await response.json();
+      console.log("Received auth data:", data);
+      
+      // Step 2: Extract the URL from the response
+      if (!data.url) {
+        throw new Error("No authentication URL provided by the server");
+      }
+      
+      // Step 3: Open a popup window with the authentication URL
+      const width = 800;
+      const height = 600;
+      const left = (screen.width - width) / 2;
+      const top = (screen.height - height) / 2;
+      
+      const authWindow = window.open(
+        data.url,
+        "GoogleAuth",
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+      
+      if (!authWindow) {
+        throw new Error("Popup blocked. Please allow popups for this site.");
+      }
+      
+      // Step 4: Set up a message listener for the auth result
+      // This assumes your callback page will send a postMessage
+      const messageListener = (event) => {
+        // Verify the message origin matches your API domain
+        if (event.origin !== new URL(API_URL).origin) {
+          return;
+        }
+        
+        console.log("Received auth message:", event.data);
+        
+        if (event.data.token) {
+          // Remove the listener and close the window
+          window.removeEventListener('message', messageListener);
+          authWindow.close();
+          
+          // Update auth state
+          authState = {
+            isAuthenticated: true,
+            token: event.data.token,
+            user: event.data.user
+          };
+          
+          // Store token in secure storage
+          chrome.storage.local.set({
+            'authToken': event.data.token,
+            'userData': event.data.user
+          }).then(() => {
+            // Notify any open extension pages about the login
+            chrome.runtime.sendMessage({
+              action: 'auth_state_changed',
+              isAuthenticated: true,
+              user: event.data.user
+            });
+            
+            console.log("Authentication successful!");
+            resolve(true);
+          });
+        } else if (event.data.error) {
+          window.removeEventListener('message', messageListener);
+          authWindow.close();
+          reject(new Error(event.data.error));
+        }
+      };
+      
+      window.addEventListener('message', messageListener);
+      
+      // Set a timeout to clean up if auth takes too long
+      setTimeout(() => {
+        window.removeEventListener('message', messageListener);
+        if (!authWindow.closed) {
+          authWindow.close();
+        }
+        reject(new Error("Authentication timed out after 2 minutes"));
+      }, 120000); // 2 minute timeout
+      
+    } catch (error) {
+      console.error("Authentication error:", error);
+      reject(error);
+    }
+  });
+}
+
+// New function to handle Google login with your backend
+async function loginWithGoogle(accessToken) {
+  try {
+    console.log('Sending access token to backend...');
+    
+    const response = await fetch(`${API_URL}/auth/login/google`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token: accessToken })
+    });
+    
+    console.log("Backend response status:", response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Backend error response:", errorText);
+      return { success: false, error: `Server error: ${response.status} - ${errorText}` };
+    }
+    
+    const data = await response.json();
+    console.log("Backend login response:", data);
+    
+    if (!data.token) {
+      return { success: false, error: 'Invalid response from server - no token returned' };
+    }
+    
+    return {
+      success: true,
+      token: data.token,
+      user: data.user
+    };
+  } catch (error) {
+    console.error('Backend login error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Function to get user profile information from Google
+async function getUserInfo(token) {
+  try {
+    console.log('Fetching user info from Google...');
+    
+    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get user info: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting user info:', error);
+    throw error;
+  }
+}
+
+// Logout function
+async function logout() {
+  // Remove the Google auth token
+  chrome.identity.clearAllCachedAuthTokens(() => {
+    console.log('Cleared all cached auth tokens');
+  });
+  
+  // Clear local storage
+  await chrome.storage.local.remove(['authToken', 'userData']);
+  
+  // Reset auth state
+  authState = {
+    isAuthenticated: false,
+    token: null,
+    user: null
+  };
+  
+  // Notify any open extension pages
+  chrome.runtime.sendMessage({
+    action: 'auth_state_changed',
+    isAuthenticated: false
+  });
+  
+  console.log('Logged out successfully');
+}
+
+// Check if user is authenticated on startup
+async function checkAuthState() {
+  const data = await chrome.storage.local.get(['authToken', 'userData']);
+  
+  if (data.authToken) {
+    // Validate token with server
+    const isValid = await validateToken(data.authToken);
+    
+    if (isValid) {
+      authState = {
+        isAuthenticated: true,
+        token: data.authToken,
+        user: data.userData
+      };
+      console.log('User authenticated from stored token');
+    } else {
+      // Token invalid, clear storage
+      await chrome.storage.local.remove(['authToken', 'userData']);
+      console.log('Stored token invalid, cleared auth data');
+    }
+  }
+}
+
+// Validate token with server
+async function validateToken(token) {
+  try {
+    const response = await fetch(`${API_URL}/auth/validate-token`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    return response.ok;
+  } catch (error) {
+    console.error('Token validation error:', error);
+    return false;
+  }
+}
+
 // Test API connectivity at startup with auth support
 function testApiConnection() {
   console.log("Testing API connection...");
@@ -311,5 +661,102 @@ function testApiConnection() {
     });
 }
 
+// Add this function to your background.js
+
+// Simple test function to understand the API response
+async function testGoogleAuth() {
+  const API_URL = "https://api.beekayprecision.com";
+  console.log("Testing Google Auth API...");
+  
+  try {
+    // Make a simple GET request to the auth endpoint
+    const response = await fetch(`${API_URL}/auth/login/google`);
+    console.log("API Response Status:", response.status);
+    
+    // Get the response text
+    const responseText = await response.text();
+    console.log("API Response Body:", responseText);
+    
+    // Try to parse as JSON if possible
+    try {
+      const jsonData = JSON.parse(responseText);
+      console.log("Parsed JSON:", jsonData);
+      
+      // If there's a URL in the response, log it
+      if (jsonData.url) {
+        console.log("Auth URL found:", jsonData.url);
+        
+        // Open the URL in a new tab for testing
+        chrome.tabs.create({ url: jsonData.url });
+      }
+    } catch (parseError) {
+      console.log("Response is not valid JSON");
+    }
+    
+    return "Test completed, check console logs";
+  } catch (error) {
+    console.error("Test failed:", error);
+    return "Test failed: " + error.message;
+  }
+}
+
+// Modify your message listener to include a test function
+// Add this to your existing chrome.runtime.onMessage.addListener function in background.js
+
+// Handle auth update from callback page
+if (request.action === "auth_updated") {
+  console.log("Received auth update:", request.data);
+  
+  if (request.data && request.data.token) {
+    // Update auth state
+    authState = {
+      isAuthenticated: true,
+      token: request.data.token,
+      user: request.data.user
+    };
+    
+    // Store token in secure storage
+    await chrome.storage.local.set({
+      'authToken': request.data.token,
+      'userData': request.data.user
+    });
+    
+    // Notify any open extension pages about the login
+    chrome.runtime.sendMessage({
+      action: 'auth_state_changed',
+      isAuthenticated: true,
+      user: request.data.user,
+      token: request.data.token
+    });
+    
+    console.log("Authentication updated successfully!");
+    sendResponse({ success: true });
+  } else {
+    // Clear auth state (logout)
+    authState = {
+      isAuthenticated: false,
+      token: null,
+      user: null
+    };
+    
+    // Clear storage
+    await chrome.storage.local.remove(['authToken', 'userData']);
+    
+    // Notify any open extension pages
+    chrome.runtime.sendMessage({
+      action: 'auth_state_changed',
+      isAuthenticated: false
+    });
+    
+    console.log("Authentication cleared!");
+    sendResponse({ success: true });
+  }
+  
+  return true;
+}
+
 // Run connectivity test at startup
 testApiConnection();
+
+// Check auth state on startup
+checkAuthState();

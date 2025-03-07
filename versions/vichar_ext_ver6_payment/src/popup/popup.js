@@ -4,7 +4,100 @@ import {
   getCurrentUser, 
   loginWithGoogle, 
   fetchUserData 
-} from '../auth-storage.js';
+} from '../auth/auth-storage.js';
+
+// Function to get the current authentication state
+async function getAuthState() {
+  try {
+    // First try to get it from the background script
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: "getAuthState" }, (response) => {
+        if (chrome.runtime.lastError || !response) {
+          // If there's an error or no response, fall back to local check
+          console.log("Error getting auth state from background, using local check");
+          resolve({
+            isAuthenticated: isAuthenticated(),
+            user: getCurrentUser()
+          });
+        } else {
+          // Use the response from the background script
+          resolve(response);
+        }
+      });
+    });
+  } catch (error) {
+    console.error("Error in getAuthState:", error);
+    // Return a default state if there's an error
+    return {
+      isAuthenticated: false,
+      user: null
+    };
+  }
+}
+
+// Function to update the UI based on auth state
+function updateAuthUI(authState) {
+  console.log("Updating auth UI with state:", authState);
+  
+  // Enable/disable buttons based on auth state
+  if (authState && authState.isAuthenticated) {
+    // User is authenticated, enable buttons
+    const captureButton = document.getElementById('captureBtn');
+    const sidebarButton = document.getElementById('sidebarBtn');
+    
+    if (captureButton) {
+      captureButton.disabled = false;
+      console.log("Capture button enabled");
+    }
+    
+    if (sidebarButton) {
+      sidebarButton.disabled = false;
+      console.log("Sidebar button enabled");
+    }
+  }
+}
+
+// At the top of popup.js
+document.addEventListener('DOMContentLoaded', async function() {
+  console.log("Popup loaded");
+  
+  // Create auth section in the popup
+  const authSection = document.createElement('div');
+  authSection.id = 'auth-section';
+  authSection.className = 'section';
+  
+  // Get current auth state
+  const authState = await getAuthState();
+  console.log("Auth state:", authState);
+  
+  // Update UI based on auth state
+  updateAuthUI(authState);
+  
+  // Add auth section to popup
+  const firstElement = document.body.firstChild;
+  if (firstElement) {
+    document.body.insertBefore(authSection, firstElement);
+  } else {
+    document.body.appendChild(authSection);
+  }
+  
+  // Set up click handlers
+  document.body.addEventListener('click', async (event) => {
+    if (event.target.id === 'login-button') {
+      console.log("Login button clicked");
+      try {
+        const result = await login();
+        console.log("Login result:", result);
+        if (result && result.success) {
+          updateAuthUI({ isAuthenticated: true, user: result.user });
+        }
+      } catch (error) {
+        console.error("Login error:", error);
+        alert("Login failed: " + error.message);
+      }
+    }
+  });
+});
 
 document.addEventListener('DOMContentLoaded', function() {
   const captureButton = document.getElementById('captureBtn');
@@ -64,14 +157,18 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Update user info section
   function updateUserInfoSection() {
+    console.log("Updating user info section, isAuthenticated:", isAuthenticated());
+
     if (isAuthenticated()) {
       const user = getCurrentUser();
+      console.log("Current user:", user);
+      
       userInfoSection.innerHTML = `
         <div class="user-logged-in">
           <div class="user-details">
-            <span class="user-name">${user.full_name || user.email}</span>
+            <span class="user-name">${user?.full_name || user?.email || 'User'}</span>
             <div class="credits-display">
-              <span class="credits-count">${user.credits}</span>
+              <span class="credits-count">${user?.credits || 0}</span>
               <span class="credits-label">credits</span>
             </div>
           </div>
@@ -88,7 +185,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }, 0);
       
       // Update button state
-      updateButtonState();
+      enableButtons();
     } else {
       userInfoSection.innerHTML = `
         <div class="user-logged-out">
@@ -106,88 +203,134 @@ document.addEventListener('DOMContentLoaded', function() {
       }, 0);
       
       // Update button state
-      updateButtonState();
+      disableButtons();
     }
   }
   
-  // Handle login
-  function handleLogin() {
+  // Enable both action buttons
+  function enableButtons() {
+    console.log("Enabling buttons");
+    if (captureButton) {
+      captureButton.disabled = false;
+      captureButton.title = "";
+      console.log("Capture button enabled");
+    }
+    
+    if (sidebarButton) {
+      sidebarButton.disabled = false;
+      sidebarButton.title = "";
+      console.log("Sidebar button enabled");
+    }
+  }
+  
+  // Disable both action buttons
+  function disableButtons() {
+    console.log("Disabling buttons");
+    if (captureButton) {
+      captureButton.disabled = true;
+      captureButton.title = "Login to analyze positions";
+    }
+    
+    if (sidebarButton) {
+      sidebarButton.disabled = true;
+      sidebarButton.title = "Login to analyze positions";
+    }
+  }
+  
+  // Updated Google login handler that directly fetches and opens the auth URL
+  async function handleLogin() {
     showStatus('Opening login window...', 'info');
     
-    loginWithGoogle()
-      .then(authData => {
-        console.log("Login successful:", authData);
-        updateUserInfoSection();
-        showStatus('Login successful!', 'success');
-      })
-      .catch(error => {
-        console.error("Login error:", error);
-        showStatus(`Login error: ${error.message}`, 'error');
-      });
+    try {
+      // Directly fetch the auth URL from the API
+      const response = await fetch('https://api.beekayprecision.com/auth/login/google');
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      // Parse the JSON response
+      const data = await response.json();
+      
+      if (!data.url) {
+        throw new Error('No authentication URL found in the response');
+      }
+      
+      console.log('Opening auth URL:', data.url);
+      
+      // Open the authentication URL in a new tab
+      chrome.tabs.create({ url: data.url });
+      
+      showStatus('Continue in the opened tab...', 'info');
+      
+      // We'll handle the actual login through the callback URL
+      // Your backend should redirect to a page that calls loginWithGoogle()
+      
+    } catch (error) {
+      console.error('Login error:', error);
+      showStatus(`Login error: ${error.message}`, 'error');
+    }
   }
   
   // Handle logout
   function handleLogout() {
-    import('../auth-storage.js').then(module => {
+    import('../auth/auth-storage.js').then(module => {
       module.clearAuth();
       updateUserInfoSection();
       showStatus('Logged out successfully', 'info');
     });
   }
   
-  // Update button state based on auth and credits
-  function updateButtonState() {
-    if (isAuthenticated()) {
-      const user = getCurrentUser();
+  // IMPORTANT: Add direct event listeners to buttons, ensuring they work
+  if (captureButton) {
+    console.log("Setting up capture button direct listener");
+    captureButton.addEventListener('click', function() {
+      console.log("Capture button clicked (direct handler)");
       
-      if (captureButton) {
-        captureButton.disabled = user.credits <= 0;
-        captureButton.title = user.credits <= 0 ? 
-          "You need credits to analyze positions" : "";
-      }
-      
-      if (sidebarButton) {
-        sidebarButton.disabled = user.credits <= 0;
-        sidebarButton.title = user.credits <= 0 ? 
-          "You need credits to analyze positions" : "";
-      }
-    } else {
-      if (captureButton) {
-        captureButton.disabled = true;
-        captureButton.title = "Login to analyze positions";
+      // Check if we're logged in
+      if (!isAuthenticated()) {
+        showStatus('Please login to use this feature', 'error');
+        return;
       }
       
-      if (sidebarButton) {
-        sidebarButton.disabled = true;
-        sidebarButton.title = "Login to analyze positions";
-      }
-    }
+      captureChessPosition();
+    });
+  } else {
+    console.error("Capture button not found in DOM!");
   }
   
-  // When the capture button is clicked (for standalone analysis page)
-  captureButton.addEventListener('click', async () => {
-    // Check if user is authenticated and has credits
-    if (!isAuthenticated()) {
-      showStatus('Please login to use this feature', 'error');
-      return;
-    }
+  if (sidebarButton) {
+    console.log("Setting up sidebar button direct listener");
+    sidebarButton.addEventListener('click', function() {
+      console.log("Sidebar button clicked (direct handler)");
+      
+      // Check if we're logged in
+      if (!isAuthenticated()) {
+        showStatus('Please login to use this feature', 'error');
+        return;
+      }
+      
+      openAnalysisSidebar();
+    });
+  } else {
+    console.error("Sidebar button not found in DOM!");
+  }
+  
+  // Function to capture chess position - simplified for reliability
+  async function captureChessPosition() {
+    console.log("captureChessPosition function called");
+    showStatus('Attempting to capture chess board...', 'info');
     
-    const user = getCurrentUser();
-    if (user.credits <= 0) {
-      showStatus('You need credits to analyze positions', 'error');
-      return;
-    }
-    
-    console.log("Capture button clicked");
     try {
       // Get the current active tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      console.log("Current tab:", tab);
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       
-      if (!tab) {
+      if (!tabs || !tabs.length) {
         showStatus('Could not determine current tab.', 'error');
         return;
       }
+      
+      const tab = tabs[0];
       
       // Check if we're on a supported chess site
       const url = tab.url || '';
@@ -198,30 +341,24 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       
-      showStatus('Attempting to capture chess board...', 'info');
-      
-      // Use a Promise-based approach to handle the message response
-      try {
-        const response = await new Promise((resolve, reject) => {
-          chrome.runtime.sendMessage({ 
-            action: "captureBoard",
-            tabId: tab.id 
-          }, (response) => {
-            if (chrome.runtime.lastError) {
-              reject(chrome.runtime.lastError);
-              return;
-            }
-            resolve(response);
-          });
-        });
+      // Send message to background script
+      chrome.runtime.sendMessage({ 
+        action: "captureBoard",
+        tabId: tab.id 
+      }, function(response) {
+        console.log("Capture response:", response);
         
-        console.log("Response from background script:", response);
+        if (chrome.runtime.lastError) {
+          console.error("Message error:", chrome.runtime.lastError);
+          showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
+          return;
+        }
         
         if (response && response.success) {
           showStatus('Chess position captured successfully!', 'success');
           
-          // Open the analysis page after a short delay
-          setTimeout(() => {
+          // Open the analysis page
+          setTimeout(function() {
             chrome.tabs.create({ url: chrome.runtime.getURL('src/analysis/analysis.html') });
             window.close(); // Close the popup
           }, 1000);
@@ -229,93 +366,70 @@ document.addEventListener('DOMContentLoaded', function() {
           const errorMsg = response && response.error ? response.error : 'Unknown error';
           showStatus('Error: ' + errorMsg, 'error');
         }
-      } catch (error) {
-        console.error("Message error:", error);
-        showStatus(`Error: ${error.message}`, 'error');
-      }
+      });
     } catch (error) {
-      console.error("Error in popup.js:", error);
-      showStatus(`Error: ${error.message}`, 'error');
+      console.error("Error in capture function:", error);
+      showStatus('Error: ' + error.message, 'error');
     }
-  });
+  }
   
-  // When the sidebar button is clicked
-  if (sidebarButton) {
-    sidebarButton.addEventListener('click', async () => {
-      // Check if user is authenticated and has credits
-      if (!isAuthenticated()) {
-        showStatus('Please login to use this feature', 'error');
+  // Function to open sidebar - simplified for reliability
+  async function openAnalysisSidebar() {
+    console.log("openAnalysisSidebar function called");
+    showStatus('Opening analysis sidebar...', 'info');
+    
+    try {
+      // Get the current active tab
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      if (!tabs || !tabs.length) {
+        showStatus('Could not determine current tab.', 'error');
         return;
       }
       
-      const user = getCurrentUser();
-      if (user.credits <= 0) {
-        showStatus('You need credits to analyze positions', 'error');
+      const tab = tabs[0];
+      
+      // Check if we're on a supported chess site
+      const url = tab.url || '';
+      const isChessSite = url.includes('lichess.org') || url.includes('chess.com');
+      
+      if (!isChessSite) {
+        showStatus('Please navigate to Lichess or Chess.com to use the sidebar.', 'error');
         return;
       }
       
-      console.log("Sidebar button clicked");
-      try {
-        // Get the current active tab
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        console.log("Current tab for sidebar:", tab);
+      // Send message to background script
+      chrome.runtime.sendMessage({ 
+        action: "showSidebar"
+      }, function(response) {
+        console.log("Sidebar response:", response);
         
-        if (!tab) {
-          showStatus('Could not determine current tab.', 'error');
+        if (chrome.runtime.lastError) {
+          console.error("Message error:", chrome.runtime.lastError);
+          showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
           return;
         }
         
-        // Check if we're on a supported chess site
-        const url = tab.url || '';
-        const isChessSite = url.includes('lichess.org') || url.includes('chess.com');
-        
-        if (!isChessSite) {
-          showStatus('Please navigate to Lichess or Chess.com to use the sidebar.', 'error');
-          return;
+        if (response && response.success) {
+          window.close(); // Close the popup
+        } else {
+          const errorMsg = response && response.error ? response.error : 'Unknown error';
+          showStatus('Error: ' + errorMsg, 'error');
         }
-        
-        showStatus('Opening analysis sidebar...', 'info');
-        
-        try {
-          // First ensure the content script is loaded
-          await ensureContentScriptLoaded(tab.id);
-          
-          // Send a message to the background script instead (which will relay to content script)
-          // This avoids direct message port issues between popup and content script
-          const response = await new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage({ 
-              action: "showSidebar"
-            }, (response) => {
-              if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
-                return;
-              }
-              resolve(response);
-            });
-          });
-          
-          console.log("Response from background script:", response);
-          
-          if (response && response.success) {
-            window.close(); // Close the popup
-          } else {
-            const errorMsg = response && response.error ? response.error : 'Unknown error';
-            showStatus('Error: ' + errorMsg, 'error');
-          }
-        } catch (error) {
-          console.error("Error showing sidebar:", error);
-          showStatus(`Error: ${error.message}. Try refreshing the chess page.`, 'error');
-        }
-      } catch (error) {
-        console.error("Error in sidebar button handler:", error);
-        showStatus(`Error: ${error.message}`, 'error');
-      }
-    });
+      });
+    } catch (error) {
+      console.error("Error in sidebar function:", error);
+      showStatus('Error: ' + error.message, 'error');
+    }
   }
   
   // Helper function to show status messages
   function showStatus(message, type) {
     console.log("Status:", message, type);
+    if (!statusDiv) {
+      console.error("Status div not found!");
+      return;
+    }
     statusDiv.textContent = message;
     statusDiv.className = 'status ' + (type || 'info');
     statusDiv.style.display = 'block';
@@ -324,7 +438,32 @@ document.addEventListener('DOMContentLoaded', function() {
   // Check for auth status changes (e.g., from other extension pages)
   window.addEventListener('storage', (event) => {
     if (event.key === 'chess_assistant_auth') {
+      console.log("Auth storage event detected, updating UI");
       updateUserInfoSection();
     }
   });
+  
+  // Add listener for auth_changed event from auth-storage.js
+  window.addEventListener('auth_changed', (event) => {
+    console.log("Auth changed event received", event.detail);
+    updateUserInfoSection();
+  });
+  
+  // Simple login function for the top section
+  async function login() {
+    try {
+      // Call the loginWithGoogle function from auth-storage.js
+      const authData = await loginWithGoogle();
+      return {
+        success: true,
+        user: authData.user
+      };
+    } catch (error) {
+      console.error("Login function error:", error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
 });
