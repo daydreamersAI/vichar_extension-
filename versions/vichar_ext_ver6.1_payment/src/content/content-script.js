@@ -1,99 +1,141 @@
-// Updated content-script.js with authentication and payment integration
+// Updated content-script.js with robust authentication integration
 console.log("Chess analyzer content script loaded at:", new Date().toISOString());
 
-// Instead of import statements, we'll use a different approach
-// Define placeholder functions that will be replaced when the auth module loads
-let isAuthenticated = () => false;
-let getCurrentUser = () => null;
+// Create a global namespace for our functions
+window.chessAnalyzerApp = window.chessAnalyzerApp || {};
+
+// Auth module reference
+let authModule = null;
+
+// Define placeholder auth functions until the module loads
+let isAuthenticated = () => {
+  if (authModule) return authModule.isAuthenticated();
+  // Try localStorage as fallback
+  try {
+    const authData = localStorage.getItem('chess_assistant_auth');
+    return authData && JSON.parse(authData).token;
+  } catch (e) {
+    return false;
+  }
+};
+
+let getCurrentUser = () => {
+  if (authModule) return authModule.getCurrentUser();
+  // Try localStorage as fallback
+  try {
+    const authData = localStorage.getItem('chess_assistant_auth');
+    return authData ? JSON.parse(authData).user : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+let getAuthToken = () => {
+  if (authModule) return authModule.getAuthToken();
+  // Try localStorage as fallback
+  try {
+    const authData = localStorage.getItem('chess_assistant_auth');
+    return authData ? JSON.parse(authData).token : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Other placeholder functions
 let loginWithGoogle = () => Promise.reject(new Error("Auth module not loaded"));
 let openPaymentPage = () => Promise.reject(new Error("Auth module not loaded"));
 let getCreditPackages = () => Promise.reject(new Error("Auth module not loaded"));
-let fetchUserData = () => Promise.reject(new Error("Auth module not loaded"));
-let getAuthToken = () => null;
 let updateUserData = () => false;
 
-// Load the auth module dynamically
+// Load the auth module using a more robust method
 function loadAuthModule() {
-  try {
-    const authScriptUrl = chrome.runtime.getURL('src/auth/auth-storage.js');
-    
-    // Dynamically load the script
-    const script = document.createElement('script');
-    script.src = authScriptUrl;
-    script.type = 'text/javascript';
-    
-    // When the script loads, it will register its functions in the window object
-    script.onload = () => {
-      console.log("Auth module loaded successfully");
-      
-      // Now assign the real functions from the loaded module
+  return new Promise((resolve, reject) => {
+    try {
+      // First check if it's already in the global namespace
       if (window.chessAuthModule) {
-        isAuthenticated = window.chessAuthModule.isAuthenticated;
-        getCurrentUser = window.chessAuthModule.getCurrentUser;
-        loginWithGoogle = window.chessAuthModule.loginWithGoogle;
-        openPaymentPage = window.chessAuthModule.openPaymentPage;
-        getCreditPackages = window.chessAuthModule.getCreditPackages;
-        fetchUserData = window.chessAuthModule.fetchUserData;
-        getAuthToken = window.chessAuthModule.getAuthToken;
-        updateUserData = window.chessAuthModule.updateUserData;
-        
-        // Update UI with auth state
-        const userInfoPanel = document.getElementById('user-info-panel');
-        if (userInfoPanel) {
-          updateUserPanel(userInfoPanel);
-        }
-      } else {
-        console.error("Auth module loaded but functions not available");
+        console.log("Auth module already available in global namespace");
+        authModule = window.chessAuthModule;
+        assignAuthFunctions(authModule);
+        resolve(authModule);
+        return;
       }
-    };
-    
-    script.onerror = (error) => {
-      console.error("Failed to load auth module:", error);
-    };
-    
-    document.head.appendChild(script);
-  } catch (error) {
-    console.error("Error loading auth module:", error);
-  }
+      
+      // Otherwise, load it dynamically
+      const authScriptUrl = chrome.runtime.getURL('src/auth/auth-connector.js');
+      
+      console.log("Loading auth module from:", authScriptUrl);
+      
+      // Create script element
+      const script = document.createElement('script');
+      script.src = authScriptUrl;
+      script.type = 'text/javascript';
+      
+      // When script loads, the module will be available in window.chessAuthModule
+      script.onload = () => {
+        console.log("Auth script loaded successfully");
+        
+        // Wait a brief moment for initialization
+        setTimeout(() => {
+          if (window.chessAuthModule) {
+            console.log("Auth module available after script load");
+            authModule = window.chessAuthModule;
+            assignAuthFunctions(authModule);
+            resolve(authModule);
+          } else {
+            const error = new Error("Auth module not available after script load");
+            console.error(error);
+            reject(error);
+          }
+        }, 100);
+      };
+      
+      script.onerror = (event) => {
+        const error = new Error("Failed to load auth script");
+        console.error("Script load error:", event);
+        reject(error);
+      };
+      
+      // Add script to page
+      document.head.appendChild(script);
+      
+    } catch (error) {
+      console.error("Error in loadAuthModule:", error);
+      reject(error);
+    }
+  });
 }
 
-// Load the auth module when the page is ready
-setTimeout(loadAuthModule, 500);
-
-// const CACHE_BUST = new Date().getTime();
-// console.log("Cache bust ID:", CACHE_BUST);
-
-// This is the main content script that gets injected by Chrome
-console.log("Chess analyzer content script loader initialized");
-
-// // Updated content-script.js with authentication and payment integration
-// console.log("Chess analyzer content script loaded at:", new Date().toISOString());
-
-// import { 
-//   isAuthenticated, 
-//   getCurrentUser, 
-//   loginWithGoogle, 
-//   openPaymentPage,
-//   getCreditPackages,
-//   fetchUserData,
-//   getAuthToken,
-//   updateUserData 
-// } from './auth-storage.js';
-
-const CACHE_BUST = new Date().getTime();
-console.log("Cache bust ID:", CACHE_BUST);
-
-// This is the main content script that gets injected by Chrome
-console.log("Chess analyzer content script loader initialized");
+// Assign auth functions from the module
+function assignAuthFunctions(module) {
+  // Assign all functions from the module
+  isAuthenticated = module.isAuthenticated;
+  getCurrentUser = module.getCurrentUser;
+  loginWithGoogle = module.loginWithGoogle;
+  openPaymentPage = module.openPaymentPage;
+  getCreditPackages = module.getCreditPackages;
+  getAuthToken = module.getAuthToken;
+  updateUserData = module.updateUserData;
+  
+  console.log("Auth functions assigned, authenticated:", isAuthenticated());
+  
+  // Update the UI based on auth state
+  const userInfoPanel = document.getElementById('user-info-panel');
+  if (userInfoPanel) {
+    updateUserPanel(userInfoPanel);
+  }
+  
+  // Update ask button state
+  updateAskButtonState();
+}
 
 // Create a global variable to keep track of the sidebar state
 let sidebarInitialized = false;
 let sidebarVisible = false;
 
-// API configuration - updated to match your deployment
-const API_URL = "https://api.beekayprecision.com"; // Updated API server address
+// API configuration
+const API_URL = "https://api.beekayprecision.com";
 
-// Make sure the toggle button has correct z-index and is visible
+// Ensure the toggle button is visible
 function ensureToggleButtonVisible() {
   const toggleButton = document.getElementById('sidebar-toggle');
   if (toggleButton) {
@@ -214,87 +256,6 @@ function initializeSidebar() {
   // Update the user panel based on auth state
   updateUserPanel(userInfoPanel);
   
-  // Function to update user panel
-  function updateUserPanel(panel) {
-    if (isAuthenticated()) {
-      const user = getCurrentUser();
-      
-      // Update panel content for logged-in user
-      panel.innerHTML = `
-        <div style="flex: 1;">
-          <div style="font-weight: 600; font-size: 14px;">${user.full_name || user.email}</div>
-          <div style="display: flex; align-items: center; margin-top: 5px;">
-            <span style="color: #34a853; font-weight: 600;">${user.credits}</span>
-            <span style="margin-left: 5px; font-size: 13px; color: #555;">credits</span>
-          </div>
-        </div>
-        <button id="buy-credits-btn" style="
-          padding: 6px 12px;
-          background-color: #fbbc05;
-          color: #333;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-        ">Buy Credits</button>
-      `;
-      
-      // Add event listener for the buy credits button
-      setTimeout(() => {
-        const buyCreditsBtn = document.getElementById('buy-credits-btn');
-        if (buyCreditsBtn) {
-          buyCreditsBtn.addEventListener('click', () => {
-            toggleCreditPackages();
-          });
-        }
-      }, 0);
-      
-      // Make sure relevant containers are visible
-      const creditPackagesContainer = document.getElementById('credit-packages-container');
-      if (creditPackagesContainer) {
-        // Start hidden, will be toggled by the button
-        creditPackagesContainer.style.display = 'none';
-      }
-      
-    } else {
-      // Update panel content for logged-out user
-      panel.innerHTML = `
-        <div style="flex: 1;">
-          <div style="font-weight: 600; font-size: 14px;">Not logged in</div>
-          <div style="font-size: 13px; color: #555; margin-top: 5px;">Login to use AI chess analysis</div>
-        </div>
-        <button id="login-btn" style="
-          padding: 6px 12px;
-          background-color: #4285f4;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-        ">Login with Google</button>
-      `;
-      
-      // Add event listener for the login button
-      setTimeout(() => {
-        const loginBtn = document.getElementById('login-btn');
-        if (loginBtn) {
-          loginBtn.addEventListener('click', handleLogin);
-        }
-      }, 0);
-      
-      // Hide credit packages when logged out
-      const creditPackagesContainer = document.getElementById('credit-packages-container');
-      if (creditPackagesContainer) {
-        creditPackagesContainer.style.display = 'none';
-      }
-    }
-    
-    // Update ask button state
-    updateAskButtonState();
-  }
-  
   // Question input
   const questionContainer = document.createElement('div');
   questionContainer.style.cssText = `
@@ -384,7 +345,7 @@ function initializeSidebar() {
   askButton.addEventListener('click', () => {
     if (isAuthenticated()) {
       const user = getCurrentUser();
-      if (user.credits > 0) {
+      if (user && user.credits > 0) {
         askQuestion();
       } else {
         showInsufficientCreditsWarning();
@@ -399,7 +360,7 @@ function initializeSidebar() {
   questionContainer.appendChild(aiVisionContainer);
   questionContainer.appendChild(askButton);
   
-  // Response area - MOVED UP below question
+  // Response area
   const responseContainer = document.createElement('div');
   responseContainer.style.cssText = `
     display: flex;
@@ -609,11 +570,29 @@ function initializeSidebar() {
     color: #333;
     font-size: 16px;
     margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   `;
   
+  // Add close button for packages
+  const closePackagesBtn = document.createElement('button');
+  closePackagesBtn.textContent = 'X';
+  closePackagesBtn.style.cssText = `
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: #555;
+  `;
+  closePackagesBtn.addEventListener('click', () => {
+    creditPackagesContainer.style.display = 'none';
+  });
+  
+  packagesHeader.appendChild(closePackagesBtn);
   creditPackagesContainer.appendChild(packagesHeader);
   
-  // Package buttons will be added dynamically
+  // Package buttons container
   const packageButtonsContainer = document.createElement('div');
   packageButtonsContainer.id = 'package-buttons';
   packageButtonsContainer.style.cssText = `
@@ -626,13 +605,13 @@ function initializeSidebar() {
   
   // Assemble the content
   content.appendChild(header);
-  content.appendChild(userInfoPanel);     // New: User info panel
-  content.appendChild(questionContainer);  // 1. Question input
-  content.appendChild(responseContainer);  // 2. Response area
-  content.appendChild(captureButton);      // 3. Capture button
-  content.appendChild(imageContainer);     // 4. Captured image
-  content.appendChild(gameInfoContainer);  // 5. Game info (FEN/PGN)
-  content.appendChild(creditPackagesContainer); // 6. Credit packages
+  content.appendChild(userInfoPanel);     // User info panel
+  content.appendChild(questionContainer);  // Question input
+  content.appendChild(responseContainer);  // Response area
+  content.appendChild(captureButton);      // Capture button
+  content.appendChild(imageContainer);     // Captured image
+  content.appendChild(gameInfoContainer);  // Game info (FEN/PGN)
+  content.appendChild(creditPackagesContainer); // Credit packages
   
   // Add content to sidebar
   sidebar.appendChild(content);
@@ -644,7 +623,13 @@ function initializeSidebar() {
   sidebarInitialized = true;
   console.log("Sidebar elements created successfully");
   
-  // Load credit packages if user is logged in
+  // Check if we need to load credit packages
+  checkAuthAndLoadPackages();
+}
+
+// Function to check auth and load packages if authenticated
+function checkAuthAndLoadPackages() {
+  console.log("Checking auth status for credit packages", isAuthenticated());
   if (isAuthenticated()) {
     loadCreditPackages();
   }
@@ -660,7 +645,110 @@ function toggleSidebar() {
   console.log("Sidebar visibility toggled:", sidebarVisible);
 }
 
-// Helper functions for authentication and credits
+// Function to update user panel
+function updateUserPanel(panel) {
+  console.log("Updating user panel, authenticated:", isAuthenticated());
+  
+  if (isAuthenticated()) {
+    const user = getCurrentUser();
+    console.log("Current user:", user);
+    
+    // Update panel content for logged-in user
+    panel.innerHTML = `
+      <div style="flex: 1;">
+        <div style="font-weight: 600; font-size: 14px;">${user?.full_name || user?.email || 'User'}</div>
+        <div style="display: flex; align-items: center; margin-top: 5px;">
+          <span style="color: #34a853; font-weight: 600;">${user?.credits || 0}</span>
+          <span style="margin-left: 5px; font-size: 13px; color: #555;">credits</span>
+        </div>
+      </div>
+      <button id="buy-credits-btn" style="
+        padding: 6px 12px;
+        background-color: #fbbc05;
+        color: #333;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+      ">Buy Credits</button>
+    `;
+    
+    // Add event listener for the buy credits button
+    setTimeout(() => {
+      const buyCreditsBtn = document.getElementById('buy-credits-btn');
+      if (buyCreditsBtn) {
+        buyCreditsBtn.addEventListener('click', () => {
+          toggleCreditPackages();
+        });
+      }
+    }, 0);
+    
+  } else {
+    // Update panel content for logged-out user
+    panel.innerHTML = `
+      <div style="flex: 1;">
+        <div style="font-weight: 600; font-size: 14px;">Not logged in</div>
+        <div style="font-size: 13px; color: #555; margin-top: 5px;">Login to use AI chess analysis</div>
+      </div>
+      <button id="login-btn" style="
+        padding: 6px 12px;
+        background-color: #4285f4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+      ">Login with Google</button>
+    `;
+    
+    // Add event listener for the login button
+    setTimeout(() => {
+      const loginBtn = document.getElementById('login-btn');
+      if (loginBtn) {
+        loginBtn.addEventListener('click', handleLogin);
+      }
+    }, 0);
+    
+    // Hide credit packages when logged out
+    const creditPackagesContainer = document.getElementById('credit-packages-container');
+    if (creditPackagesContainer) {
+      creditPackagesContainer.style.display = 'none';
+    }
+  }
+  
+  // Update ask button state
+  updateAskButtonState();
+}
+
+// Function to update ask button state
+function updateAskButtonState() {
+  const askButton = document.getElementById('ask-question-btn');
+  if (!askButton) return;
+  
+  if (isAuthenticated()) {
+    const user = getCurrentUser();
+    if (user && user.credits > 0) {
+      askButton.disabled = false;
+      askButton.title = "";
+      askButton.style.opacity = "1";
+      askButton.style.cursor = "pointer";
+    } else {
+      askButton.disabled = true;
+      askButton.title = "You need credits to analyze positions";
+      askButton.style.opacity = "0.6";
+      askButton.style.cursor = "not-allowed";
+    }
+  } else {
+    askButton.disabled = true;
+    askButton.title = "Login to analyze positions";
+    askButton.style.opacity = "0.6";
+    askButton.style.cursor = "not-allowed";
+  }
+}
+
+// Handle login
 function handleLogin() {
   const responseArea = document.getElementById('response-area');
   if (responseArea) {
@@ -673,39 +761,63 @@ function handleLogin() {
     `;
   }
   
-  loginWithGoogle()
-    .then(authData => {
-      console.log("Login successful:", authData);
-      
-      // Update the user panel
-      const userInfoPanel = document.getElementById('user-info-panel');
-      if (userInfoPanel) {
-        updateUserPanel(userInfoPanel);
+  // Make sure the auth module is loaded
+  if (authModule && authModule.loginWithGoogle) {
+    authModule.loginWithGoogle()
+      .then(authData => {
+        console.log("Login successful:", authData);
+        
+        // Update the user panel
+        const userInfoPanel = document.getElementById('user-info-panel');
+        if (userInfoPanel) {
+          updateUserPanel(userInfoPanel);
+        }
+        
+        // Load credit packages
+        loadCreditPackages();
+        
+        // Update ask button state
+        updateAskButtonState();
+        
+        if (responseArea) {
+          responseArea.textContent = `Login successful! You have ${authData.user.credits} credits available.`;
+        }
+      })
+      .catch(error => {
+        console.error("Login error:", error);
+        
+        if (responseArea) {
+          responseArea.innerHTML = `
+            <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+              <strong>Login Error:</strong> ${error.message}
+            </div>
+          `;
+        }
+      });
+  } else {
+    // Fallback to direct API call if auth module is not loaded
+    console.log("Auth module not loaded, using fallback login method");
+    
+    // Open login page in new tab
+    chrome.runtime.sendMessage({ action: "login" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Runtime error in login:", chrome.runtime.lastError);
+        if (responseArea) {
+          responseArea.textContent = 'Error: ' + chrome.runtime.lastError.message;
+        }
+        return;
       }
       
-      // Load credit packages
-      loadCreditPackages();
-      
-      // Update ask button state
-      updateAskButtonState();
+      console.log("Login response:", response);
       
       if (responseArea) {
-        responseArea.textContent = `Login successful! You have ${authData.user.credits} credits available.`;
-      }
-    })
-    .catch(error => {
-      console.error("Login error:", error);
-      
-      if (responseArea) {
-        responseArea.innerHTML = `
-          <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
-            <strong>Login Error:</strong> ${error.message}
-          </div>
-        `;
+        responseArea.textContent = 'Login initiated. Please check the opened tab to complete login.';
       }
     });
+  }
 }
 
+// Show login prompt in response area
 function showLoginPrompt() {
   const responseArea = document.getElementById('response-area');
   if (responseArea) {
@@ -736,6 +848,7 @@ function showLoginPrompt() {
   }
 }
 
+// Show insufficient credits warning
 function showInsufficientCreditsWarning() {
   const responseArea = document.getElementById('response-area');
   if (responseArea) {
@@ -768,28 +881,7 @@ function showInsufficientCreditsWarning() {
   }
 }
 
-function updateAskButtonState() {
-  const askButton = document.getElementById('ask-question-btn');
-  if (!askButton) return;
-  
-  if (isAuthenticated()) {
-    const user = getCurrentUser();
-    if (user.credits > 0) {
-      askButton.disabled = false;
-      askButton.title = "";
-      askButton.style.opacity = "1";
-    } else {
-      askButton.disabled = true;
-      askButton.title = "You need credits to analyze positions";
-      askButton.style.opacity = "0.6";
-    }
-  } else {
-    askButton.disabled = true;
-    askButton.title = "Login to analyze positions";
-    askButton.style.opacity = "0.6";
-  }
-}
-
+// Toggle credit packages container
 function toggleCreditPackages() {
   const creditPackagesContainer = document.getElementById('credit-packages-container');
   if (!creditPackagesContainer) return;
@@ -803,6 +895,7 @@ function toggleCreditPackages() {
   }
 }
 
+// Load credit packages
 async function loadCreditPackages() {
   const packageButtonsContainer = document.getElementById('package-buttons');
   if (!packageButtonsContainer) return;
@@ -825,45 +918,54 @@ async function loadCreditPackages() {
       </div>
     `;
     
-    const packages = await getCreditPackages();
-    
-    if (packages && packages.packages && packages.packages.length > 0) {
-      const buttonsHtml = packages.packages.map(pkg => `
-        <button class="package-btn" data-package-id="${pkg.id}" style="
-          padding: 10px;
-          background-color: white;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          cursor: pointer;
-          text-align: left;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        ">
-          <div>
-            <div style="font-weight: 600;">${pkg.name}</div>
-            <div style="color: #34a853; font-size: 14px; margin-top: 5px;">${pkg.credits} Credits</div>
-          </div>
-          <div style="font-weight: 600; color: #4285f4;">${pkg.amount_display}</div>
-        </button>
-      `).join('');
+    if (authModule && authModule.getCreditPackages) {
+      const packages = await authModule.getCreditPackages();
       
-      packageButtonsContainer.innerHTML = buttonsHtml;
-      
-      // Add event listeners to the package buttons
-      setTimeout(() => {
-        const packageButtons = document.querySelectorAll('.package-btn');
-        packageButtons.forEach(button => {
-          button.addEventListener('click', () => {
-            const packageId = button.getAttribute('data-package-id');
-            purchaseCredits(packageId);
+      if (packages && packages.packages && packages.packages.length > 0) {
+        const buttonsHtml = packages.packages.map(pkg => `
+          <button class="package-btn" data-package-id="${pkg.id}" style="
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          ">
+            <div>
+              <div style="font-weight: 600;">${pkg.name}</div>
+              <div style="color: #34a853; font-size: 14px; margin-top: 5px;">${pkg.credits} Credits</div>
+            </div>
+            <div style="font-weight: 600; color: #4285f4;">${pkg.amount_display}</div>
+          </button>
+        `).join('');
+        
+        packageButtonsContainer.innerHTML = buttonsHtml;
+        
+        // Add event listeners to the package buttons
+        setTimeout(() => {
+          const packageButtons = document.querySelectorAll('.package-btn');
+          packageButtons.forEach(button => {
+            button.addEventListener('click', () => {
+              const packageId = button.getAttribute('data-package-id');
+              purchaseCredits(packageId);
+            });
           });
-        });
-      }, 0);
+        }, 0);
+      } else {
+        packageButtonsContainer.innerHTML = `
+          <div style="text-align: center; padding: 10px;">
+            <p>No credit packages available</p>
+          </div>
+        `;
+      }
     } else {
+      console.error("getCreditPackages function not available");
       packageButtonsContainer.innerHTML = `
-        <div style="text-align: center; padding: 10px;">
-          <p>No credit packages available</p>
+        <div style="text-align: center; padding: 10px; color: #d32f2f;">
+          <p>Error: Credit packages service unavailable</p>
         </div>
       `;
     }
@@ -895,6 +997,7 @@ async function loadCreditPackages() {
   }
 }
 
+// Purchase credits
 function purchaseCredits(packageId) {
   if (!isAuthenticated()) {
     showLoginPrompt();
@@ -912,74 +1015,84 @@ function purchaseCredits(packageId) {
     `;
   }
   
-  openPaymentPage(packageId)
-    .then(userData => {
-      console.log("Payment successful:", userData);
-      
-      // Update the user panel
-      const userInfoPanel = document.getElementById('user-info-panel');
-      if (userInfoPanel) {
-        updateUserPanel(userInfoPanel);
-      }
-      
-      // Update ask button state
-      updateAskButtonState();
-      
-      // Show success message
-      const responseArea = document.getElementById('response-area');
-      if (responseArea) {
-        responseArea.innerHTML = `
-          <div style="padding: 10px; background-color: #e8f5e9; border-radius: 4px; color: #2e7d32;">
-            <strong>Payment Successful!</strong>
-            <p>Your credits have been updated. You now have ${userData.credits} credits.</p>
-          </div>
-        `;
-      }
-      
-      // Reload credit packages
-      loadCreditPackages();
-    })
-    .catch(error => {
-      console.error("Payment error:", error);
-      
-      if (packageButtonsContainer) {
-        packageButtonsContainer.innerHTML = `
-          <div style="text-align: center; padding: 10px; color: #d32f2f;">
-            <p>Payment error: ${error.message}</p>
-            <button id="retry-payment-btn" style="
-              padding: 6px 12px;
-              background-color: #4285f4;
-              color: white;
-              border: none;
-              border-radius: 4px;
-              cursor: pointer;
-              font-size: 13px;
-              margin-top: 10px;
-            ">Try Again</button>
-          </div>
-        `;
+  if (authModule && authModule.openPaymentPage) {
+    authModule.openPaymentPage(packageId)
+      .then(userData => {
+        console.log("Payment successful:", userData);
         
-        setTimeout(() => {
-          const retryBtn = document.getElementById('retry-payment-btn');
-          if (retryBtn) {
-            retryBtn.addEventListener('click', () => purchaseCredits(packageId));
-          }
-        }, 0);
-      }
-    });
+        // Update the user panel
+        const userInfoPanel = document.getElementById('user-info-panel');
+        if (userInfoPanel) {
+          updateUserPanel(userInfoPanel);
+        }
+        
+        // Update ask button state
+        updateAskButtonState();
+        
+        // Show success message
+        const responseArea = document.getElementById('response-area');
+        if (responseArea) {
+          responseArea.innerHTML = `
+            <div style="padding: 10px; background-color: #e8f5e9; border-radius: 4px; color: #2e7d32;">
+              <strong>Payment Successful!</strong>
+              <p>Your credits have been updated. You now have ${userData.credits} credits.</p>
+            </div>
+          `;
+        }
+        
+        // Reload credit packages
+        loadCreditPackages();
+      })
+      .catch(error => {
+        console.error("Payment error:", error);
+        
+        if (packageButtonsContainer) {
+          packageButtonsContainer.innerHTML = `
+            <div style="text-align: center; padding: 10px; color: #d32f2f;">
+              <p>Payment error: ${error.message}</p>
+              <button id="retry-payment-btn" style="
+                padding: 6px 12px;
+                background-color: #4285f4;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                margin-top: 10px;
+              ">Try Again</button>
+            </div>
+          `;
+          
+          setTimeout(() => {
+            const retryBtn = document.getElementById('retry-payment-btn');
+            if (retryBtn) {
+              retryBtn.addEventListener('click', () => purchaseCredits(packageId));
+            }
+          }, 0);
+        }
+      });
+  } else {
+    console.error("openPaymentPage function not available");
+    
+    if (packageButtonsContainer) {
+      packageButtonsContainer.innerHTML = `
+        <div style="text-align: center; padding: 10px; color: #d32f2f;">
+          <p>Payment service unavailable</p>
+        </div>
+      `;
+    }
+  }
 }
 
 // Extract base64 image data from the image source
 function getBase64FromImageSrc(src) {
-  // Check if the src is already a data URL
-  if (src.startsWith('data:image/')) {
-    // Extract just the base64 part without the data URI prefix
+  if (src && src.startsWith('data:image/')) {
     return src.split(',')[1];
   }
   return null;
 }
 
-// Function to capture the current chess position - FIXED
+// Function to capture the current chess position
 function captureCurrentPosition() {
   console.log("Capturing current position for sidebar");
   const responseArea = document.getElementById('response-area');
@@ -992,7 +1105,7 @@ function captureCurrentPosition() {
     chrome.runtime.sendMessage({ 
       action: "captureBoardForSidebar"
     }, (response) => {
-      // Immediately check for runtime errors
+      // Check for runtime errors
       if (chrome.runtime.lastError) {
         console.error("Runtime error in capture:", chrome.runtime.lastError);
         if (responseArea) {
@@ -1002,11 +1115,6 @@ function captureCurrentPosition() {
       }
       
       console.log("Capture response:", response);
-      
-      // Add logging to verify the FEN
-      chrome.storage.local.get(['capturedBoard'], (result) => {
-        console.log("CAPTURED FEN:", result.capturedBoard?.fen);
-      });
       
       if (response && response.success) {
         // Load the newly captured board
@@ -1029,7 +1137,7 @@ function captureCurrentPosition() {
   }
 }
 
-// Function to ask a question about the position - Updated with auth
+// Function to ask a question about the position
 function askQuestion() {
   const questionInput = document.getElementById('question-input');
   const responseArea = document.getElementById('response-area');
@@ -1074,11 +1182,12 @@ function askQuestion() {
     // Determine if we should use vision
     const useVision = aiVisionToggle && aiVisionToggle.checked;
     
-    // Get auth token - using async/await pattern
     try {
-      const auth = await getAuthToken();
+      // Get auth token
+      const auth = getAuthToken();
+      console.log("Using auth token:", auth ? "Present" : "Not available");
       
-      // Send request to background script to handle API call with auth token
+      // Send request to background script to handle API call
       chrome.runtime.sendMessage({
         action: "analyzeChessPosition",
         question: question,
@@ -1086,7 +1195,7 @@ function askQuestion() {
         useVision: useVision,
         authToken: auth
       }, (response) => {
-        // Immediately check for runtime errors
+        // Check for runtime errors
         if (chrome.runtime.lastError) {
           console.error("Runtime error in analysis:", chrome.runtime.lastError);
           responseArea.innerHTML = `
@@ -1097,11 +1206,24 @@ function askQuestion() {
           return;
         }
         
+        console.log("Analysis response:", response);
+        
         if (response && response.success) {
           // Check if user info was returned (to update credit count)
           if (response.user) {
+            console.log("Updating user data with:", response.user);
+            
             // Update user data
-            updateUserData(response.user);
+            if (authModule && authModule.updateUserData) {
+              authModule.updateUserData(response.user);
+            } else {
+              // Fallback: update directly in auth state
+              const authData = window.chessAuthModule && window.chessAuthModule.getAuthData();
+              if (authData) {
+                authData.user = response.user;
+                localStorage.setItem('chess_assistant_auth', JSON.stringify(authData));
+              }
+            }
             
             // Update UI
             const userInfoPanel = document.getElementById('user-info-panel');
@@ -1114,8 +1236,10 @@ function askQuestion() {
           const formattedResponse = formatAPIResponse(response.data);
           responseArea.innerHTML = formattedResponse;
         } else {
-          // Handle errors based on type
-          if (response?.error?.includes("Authentication required")) {
+          // Handle specific error cases
+          const errorMsg = response?.error || "Unknown error";
+          
+          if (errorMsg.includes("Authentication required")) {
             // Authentication error
             responseArea.innerHTML = `
               <div style="padding: 15px; text-align: center;">
@@ -1141,21 +1265,21 @@ function askQuestion() {
                 reloginBtn.addEventListener('click', handleLogin);
               }
             }, 0);
-          } else if (response?.error?.includes("Insufficient credits")) {
+          } else if (errorMsg.includes("Insufficient credits")) {
             // Insufficient credits
             showInsufficientCreditsWarning();
           } else {
             // General error
             responseArea.innerHTML = `
               <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
-                <strong>Error:</strong> ${response?.error || "Failed to analyze position"}
+                <strong>Error:</strong> ${errorMsg}
               </div>
             `;
           }
         }
       });
     } catch (error) {
-      console.error("Error getting auth token:", error);
+      console.error("Error in ask question flow:", error);
       responseArea.innerHTML = `
         <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
           <strong>Error:</strong> ${error.message}
@@ -1167,6 +1291,8 @@ function askQuestion() {
 
 // Function to format API responses with better styling
 function formatAPIResponse(response) {
+  if (!response) return "No response from the server";
+  
   // Replace newlines with HTML line breaks
   let formatted = response.replace(/\n/g, '<br>');
   
@@ -1180,7 +1306,7 @@ function formatAPIResponse(response) {
   
   // Highlight evaluations (+1.5, -0.7, etc.)
   formatted = formatted.replace(/(\+|-)\d+\.?\d*/g, 
-    '<span style="color: #188038; font-weight: 500;">$&</span>');
+    '<span style="color: #188038; font-weight: 500;">         const</span>');
   
   return formatted;
 }
@@ -1197,7 +1323,6 @@ async function loadStoredBoardData() {
       
       if (capturedBoard && capturedBoard.imageData && capturedImage) {
         console.log("Loaded stored board data");
-        console.log("PGN data:", capturedBoard.pgn ? "Found" : "Not found");
         console.log("FEN data:", capturedBoard.fen);
         
         // Update the image
@@ -1217,7 +1342,7 @@ async function loadStoredBoardData() {
           if (pgnValue) {
             // Make sure we have PGN data
             if (capturedBoard.pgn && capturedBoard.pgn.trim().length > 0) {
-              console.log("Displaying PGN in sidebar:", capturedBoard.pgn);
+              console.log("Displaying PGN in sidebar");
               pgnValue.textContent = capturedBoard.pgn;
               pgnValue.style.display = 'block';
             } else {
@@ -1246,7 +1371,7 @@ async function loadStoredBoardData() {
   }
 }
 
-// FIXED MESSAGE LISTENER - Add ping handler and improve response handling
+// Listen for messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("Content script received message:", request);
   
@@ -1281,14 +1406,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
       }
       
-      // Send response immediately
       sendResponse({ success: true });
     } catch (error) {
       console.error("Error showing sidebar:", error);
       sendResponse({ success: false, error: error.message });
     }
     
-    return true; // Keep the message channel open
+    return true;
   }
   
   if (request.action === "updateSidebarImage") {
@@ -1302,38 +1426,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: false, error: error.message });
     }
     
-    return true; // Keep the message channel open
+    return true;
   }
-});
-
-// Initialize the sidebar when the content script loads
-// But wait for the page to be fully loaded first
-document.addEventListener('DOMContentLoaded', () => {
-  console.log("DOM loaded, initializing sidebar");
-  // Initialize with some delay to ensure page is fully loaded
-  setTimeout(() => {
-    console.log("Delayed initialization of sidebar elements");
-    initializeSidebar();
-    ensureToggleButtonVisible();
-  }, 1000);
-});
-
-// If the page is already loaded, initialize immediately
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  console.log("Page already loaded, initializing sidebar immediately");
-  initializeSidebar();
-  // Check for toggle button after a short delay
-  setTimeout(ensureToggleButtonVisible, 500);
-}
-
-// Listen for storage changes (like auth state changes)
-window.addEventListener('storage', (event) => {
-  if (event.key === 'chess_assistant_auth') {
-    console.log('Auth data changed, updating UI');
+  
+  // Handle auth state changes from background
+  if (request.action === "auth_state_changed") {
+    console.log("Auth state changed:", request.isAuthenticated);
+    
+    // Update UI elements
     const userInfoPanel = document.getElementById('user-info-panel');
     if (userInfoPanel) {
       updateUserPanel(userInfoPanel);
     }
+    
+    // Update ask button state
+    updateAskButtonState();
+    
+    sendResponse({ success: true });
+    return true;
   }
 });
 
@@ -1346,3 +1456,55 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log("DOM loaded, initializing");
+  try {
+    // Load auth module first
+    await loadAuthModule();
+    
+    // Initialize sidebar
+    initializeSidebar();
+    ensureToggleButtonVisible();
+  } catch (error) {
+    console.error("Error during initialization:", error);
+  }
+});
+
+// If the page is already loaded, initialize immediately
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  console.log("Page already loaded, initializing immediately");
+  loadAuthModule().then(() => {
+    initializeSidebar();
+    ensureToggleButtonVisible();
+  }).catch(error => {
+    console.error("Error loading auth module:", error);
+  });
+}
+
+// Listen for storage changes (auth state changes)
+window.addEventListener('storage', (event) => {
+  if (event.key === 'chess_assistant_auth' || event.key === 'chess_assistant_token' || event.key === 'chess_assistant_auth_updated') {
+    console.log('Auth data changed in storage:', event.key);
+    const userInfoPanel = document.getElementById('user-info-panel');
+    if (userInfoPanel) {
+      updateUserPanel(userInfoPanel);
+    }
+    
+    // Update ask button state
+    updateAskButtonState();
+  }
+});
+
+// Listen for custom auth change events
+window.addEventListener('chess_auth_changed', (event) => {
+  console.log('Auth changed event received:', event.detail);
+  const userInfoPanel = document.getElementById('user-info-panel');
+  if (userInfoPanel) {
+    updateUserPanel(userInfoPanel);
+  }
+  
+  // Update ask button state
+  updateAskButtonState();
+});
