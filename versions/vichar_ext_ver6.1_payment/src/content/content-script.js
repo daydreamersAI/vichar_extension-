@@ -1,14 +1,84 @@
 // Updated content-script.js with authentication and payment integration
-import { 
-  isAuthenticated, 
-  getCurrentUser, 
-  loginWithGoogle, 
-  openPaymentPage,
-  getCreditPackages,
-  fetchUserData,
-  getAuthToken,
-  updateUserData 
-} from './auth-storage.js';
+console.log("Chess analyzer content script loaded at:", new Date().toISOString());
+
+// Instead of import statements, we'll use a different approach
+// Define placeholder functions that will be replaced when the auth module loads
+let isAuthenticated = () => false;
+let getCurrentUser = () => null;
+let loginWithGoogle = () => Promise.reject(new Error("Auth module not loaded"));
+let openPaymentPage = () => Promise.reject(new Error("Auth module not loaded"));
+let getCreditPackages = () => Promise.reject(new Error("Auth module not loaded"));
+let fetchUserData = () => Promise.reject(new Error("Auth module not loaded"));
+let getAuthToken = () => null;
+let updateUserData = () => false;
+
+// Load the auth module dynamically
+function loadAuthModule() {
+  try {
+    const authScriptUrl = chrome.runtime.getURL('src/auth/auth-storage.js');
+    
+    // Dynamically load the script
+    const script = document.createElement('script');
+    script.src = authScriptUrl;
+    script.type = 'text/javascript';
+    
+    // When the script loads, it will register its functions in the window object
+    script.onload = () => {
+      console.log("Auth module loaded successfully");
+      
+      // Now assign the real functions from the loaded module
+      if (window.chessAuthModule) {
+        isAuthenticated = window.chessAuthModule.isAuthenticated;
+        getCurrentUser = window.chessAuthModule.getCurrentUser;
+        loginWithGoogle = window.chessAuthModule.loginWithGoogle;
+        openPaymentPage = window.chessAuthModule.openPaymentPage;
+        getCreditPackages = window.chessAuthModule.getCreditPackages;
+        fetchUserData = window.chessAuthModule.fetchUserData;
+        getAuthToken = window.chessAuthModule.getAuthToken;
+        updateUserData = window.chessAuthModule.updateUserData;
+        
+        // Update UI with auth state
+        const userInfoPanel = document.getElementById('user-info-panel');
+        if (userInfoPanel) {
+          updateUserPanel(userInfoPanel);
+        }
+      } else {
+        console.error("Auth module loaded but functions not available");
+      }
+    };
+    
+    script.onerror = (error) => {
+      console.error("Failed to load auth module:", error);
+    };
+    
+    document.head.appendChild(script);
+  } catch (error) {
+    console.error("Error loading auth module:", error);
+  }
+}
+
+// Load the auth module when the page is ready
+setTimeout(loadAuthModule, 500);
+
+// const CACHE_BUST = new Date().getTime();
+// console.log("Cache bust ID:", CACHE_BUST);
+
+// This is the main content script that gets injected by Chrome
+console.log("Chess analyzer content script loader initialized");
+
+// // Updated content-script.js with authentication and payment integration
+// console.log("Chess analyzer content script loaded at:", new Date().toISOString());
+
+// import { 
+//   isAuthenticated, 
+//   getCurrentUser, 
+//   loginWithGoogle, 
+//   openPaymentPage,
+//   getCreditPackages,
+//   fetchUserData,
+//   getAuthToken,
+//   updateUserData 
+// } from './auth-storage.js';
 
 const CACHE_BUST = new Date().getTime();
 console.log("Cache bust ID:", CACHE_BUST);
@@ -22,6 +92,27 @@ let sidebarVisible = false;
 
 // API configuration - updated to match your deployment
 const API_URL = "https://api.beekayprecision.com"; // Updated API server address
+
+// Make sure the toggle button has correct z-index and is visible
+function ensureToggleButtonVisible() {
+  const toggleButton = document.getElementById('sidebar-toggle');
+  if (toggleButton) {
+    console.log("Toggle button found, ensuring visibility");
+    toggleButton.style.zIndex = "10000";
+    toggleButton.style.display = "flex";
+    toggleButton.style.position = "fixed";
+    toggleButton.style.right = "0";
+    toggleButton.style.top = "50%";
+    toggleButton.style.backgroundColor = "#4285f4";
+    toggleButton.style.width = "30px";
+    toggleButton.style.height = "60px";
+    toggleButton.style.cursor = "pointer";
+    toggleButton.style.borderRadius = "5px 0 0 5px";
+    toggleButton.style.boxShadow = "-2px 0 5px rgba(0, 0, 0, 0.1)";
+  } else {
+    console.log("Toggle button not found, will create in initializeSidebar");
+  }
+}
 
 // Function to create and initialize the sidebar
 function initializeSidebar() {
@@ -878,6 +969,16 @@ function purchaseCredits(packageId) {
     });
 }
 
+// Extract base64 image data from the image source
+function getBase64FromImageSrc(src) {
+  // Check if the src is already a data URL
+  if (src.startsWith('data:image/')) {
+    // Extract just the base64 part without the data URI prefix
+    return src.split(',')[1];
+  }
+  return null;
+}
+
 // Function to capture the current chess position - FIXED
 function captureCurrentPosition() {
   console.log("Capturing current position for sidebar");
@@ -928,16 +1029,6 @@ function captureCurrentPosition() {
   }
 }
 
-// Extract base64 image data from the image source
-function getBase64FromImageSrc(src) {
-  // Check if the src is already a data URL
-  if (src.startsWith('data:image/')) {
-    // Extract just the base64 part without the data URI prefix
-    return src.split(',')[1];
-  }
-  return null;
-}
-
 // Function to ask a question about the position - Updated with auth
 function askQuestion() {
   const questionInput = document.getElementById('question-input');
@@ -972,7 +1063,7 @@ function askQuestion() {
   `;
   
   // Check if we have a captured board
-  chrome.storage.local.get(['capturedBoard'], (result) => {
+  chrome.storage.local.get(['capturedBoard'], async (result) => {
     const capturedBoard = result.capturedBoard;
     
     if (!capturedBoard) {
@@ -983,17 +1074,17 @@ function askQuestion() {
     // Determine if we should use vision
     const useVision = aiVisionToggle && aiVisionToggle.checked;
     
-    // Get auth token
-    const auth = getAuthToken();
-    
-    // Send request to background script to handle API call with auth token
+    // Get auth token - using async/await pattern
     try {
+      const auth = await getAuthToken();
+      
+      // Send request to background script to handle API call with auth token
       chrome.runtime.sendMessage({
         action: "analyzeChessPosition",
         question: question,
         capturedBoard: capturedBoard,
         useVision: useVision,
-        authToken: auth ? auth.access_token : null
+        authToken: auth
       }, (response) => {
         // Immediately check for runtime errors
         if (chrome.runtime.lastError) {
@@ -1064,7 +1155,7 @@ function askQuestion() {
         }
       });
     } catch (error) {
-      console.error("Error sending analysis message:", error);
+      console.error("Error getting auth token:", error);
       responseArea.innerHTML = `
         <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
           <strong>Error:</strong> ${error.message}
@@ -1089,94 +1180,9 @@ function formatAPIResponse(response) {
   
   // Highlight evaluations (+1.5, -0.7, etc.)
   formatted = formatted.replace(/(\+|-)\d+\.?\d*/g, 
-    '<span style="color: #188038; font-weight: 500;">            <p>Your credits have been updated. You now have ${userData.credits}</span>');
+    '<span style="color: #188038; font-weight: 500;">$&</span>');
   
   return formatted;
-}
-
-// Function to call the backend API with enhanced debugging
-async function callAnalysisAPI(question, capturedBoard, imageData = null) {
-  try {
-    // Log the data being sent to API
-    console.log("Sending to API - URL:", `${API_URL}/analysis`);
-    console.log("Sending to API - FEN:", capturedBoard.fen);
-    console.log("Sending to API - PGN:", capturedBoard.pgn ? "Present (length: " + capturedBoard.pgn.length + ")" : "Not included");
-    console.log("Sending to API - Image data:", imageData ? "Present (length: " + imageData.length + ")" : "Not included");
-    
-    // Get auth token
-    const auth = getAuthToken();
-    console.log("Auth token present:", !!auth);
-    
-    // Prepare chat history
-    const chatHistory = [
-      { text: question, sender: "user" }
-    ];
-    
-    // Prepare the request payload
-    const requestData = {
-      message: question,
-      fen: capturedBoard.fen,
-      pgn: capturedBoard.pgn,
-      image_data: imageData,
-      chat_history: chatHistory
-    };
-    
-    console.log("Request payload structure:", Object.keys(requestData));
-    
-    // Determine endpoint based on auth status
-    const endpoint = auth ? `${API_URL}/analysis-with-credit` : `${API_URL}/chess/analysis`;
-    
-    // Prepare headers
-    const headers = {
-      'Content-Type': 'application/json',
-    };
-    
-    // Add auth token if available
-    if (auth) {
-      headers['Authorization'] = `Bearer ${auth.access_token}`;
-    }
-    
-    // Call our Python API with better error handling
-    console.log("Initiating fetch to:", endpoint);
-    
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(requestData)
-    });
-    
-    console.log("Response status:", response.status, response.statusText);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("API error response text:", errorText);
-      
-      // Handle specific error codes
-      if (response.status === 401) {
-        throw new Error("Authentication required. Please login to continue.");
-      } else if (response.status === 402) {
-        throw new Error("Insufficient credits. Please purchase more credits to continue.");
-      } else {
-        throw new Error(`API response error: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-    }
-    
-    const data = await response.json();
-    console.log("API response parsed successfully:", data);
-    
-    if (!data.response) {
-      console.error("API response missing 'response' field:", data);
-      throw new Error("Invalid API response format - missing 'response' field");
-    }
-    
-    return {
-      data: data.response,
-      user: data.user || null
-    };
-  } catch (error) {
-    console.error("API call error details:", error);
-    throw error;
-  }
 }
 
 // Function to load stored board data
@@ -1191,7 +1197,7 @@ async function loadStoredBoardData() {
       
       if (capturedBoard && capturedBoard.imageData && capturedImage) {
         console.log("Loaded stored board data");
-        console.log("PGN data:", capturedBoard.pgn);
+        console.log("PGN data:", capturedBoard.pgn ? "Found" : "Not found");
         console.log("FEN data:", capturedBoard.fen);
         
         // Update the image
@@ -1266,8 +1272,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (sidebar) {
         sidebar.style.right = '0';
         console.log("Sidebar displayed");
+        
+        // Make sure the toggle button is visible
+        ensureToggleButtonVisible();
       } else {
         console.error("Sidebar element not found");
+        sendResponse({ success: false, error: "Sidebar element not found" });
+        return true;
       }
       
       // Send response immediately
@@ -1299,13 +1310,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // But wait for the page to be fully loaded first
 document.addEventListener('DOMContentLoaded', () => {
   console.log("DOM loaded, initializing sidebar");
-  initializeSidebar();
+  // Initialize with some delay to ensure page is fully loaded
+  setTimeout(() => {
+    console.log("Delayed initialization of sidebar elements");
+    initializeSidebar();
+    ensureToggleButtonVisible();
+  }, 1000);
 });
 
 // If the page is already loaded, initialize immediately
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   console.log("Page already loaded, initializing sidebar immediately");
   initializeSidebar();
+  // Check for toggle button after a short delay
+  setTimeout(ensureToggleButtonVisible, 500);
 }
 
 // Listen for storage changes (like auth state changes)

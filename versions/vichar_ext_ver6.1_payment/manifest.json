@@ -48,18 +48,19 @@
     }
   ],
   "web_accessible_resources": [
-    {
-      "resources": [
-        "src/analysis/analysis.html",
-        "src/payment/payment.html",
-        "src/payment/payment.js",
-        "src/content/sidebar.js",
-        "src/content/*.js",
-        "lib/*.js"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ],
+  {
+    "resources": [
+      "src/analysis/analysis.html",
+      "src/payment/payment.html",
+      "src/payment/payment.js",
+      "src/content/sidebar.js",
+      "src/content/*.js",
+      "src/auth/*.js",
+      "lib/*.js"
+    ],
+    "matches": ["<all_urls>"]
+  }
+],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com"
   },

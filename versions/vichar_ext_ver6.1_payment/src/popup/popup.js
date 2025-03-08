@@ -1,11 +1,53 @@
-// Updated popup.js with authentication support
-import { 
-  isAuthenticated, 
-  getCurrentUser, 
-  loginWithGoogle, 
-  fetchUserData,
-  validateStoredAuth 
-} from '../auth/auth-storage.js';
+// Updated popup.js without ES modules
+
+// Define placeholder auth functions
+let isAuthenticated = () => false;
+let getCurrentUser = () => null;
+let loginWithGoogle = () => Promise.reject(new Error("Auth module not loaded"));
+let fetchUserData = () => Promise.reject(new Error("Auth module not loaded"));
+let validateStoredAuth = () => Promise.resolve(false);
+let clearAuth = () => false;
+
+// Load auth functions from the auth script
+function loadAuthModule() {
+  return new Promise((resolve, reject) => {
+    try {
+      // Create a script element to load the auth module
+      const script = document.createElement('script');
+      script.src = chrome.runtime.getURL('src/auth/auth-storage.js');
+      script.type = 'text/javascript';
+      
+      script.onload = () => {
+        console.log("Auth module loaded successfully");
+        
+        // Assign auth functions
+        if (window.chessAuthModule) {
+          isAuthenticated = window.chessAuthModule.isAuthenticated;
+          getCurrentUser = window.chessAuthModule.getCurrentUser;
+          loginWithGoogle = window.chessAuthModule.loginWithGoogle;
+          fetchUserData = window.chessAuthModule.fetchUserData;
+          validateStoredAuth = window.chessAuthModule.validateStoredAuth;
+          clearAuth = window.chessAuthModule.clearAuth;
+          
+          resolve(window.chessAuthModule);
+        } else {
+          console.error("Auth module loaded but functions not available");
+          reject(new Error("Auth module loaded but functions not available"));
+        }
+      };
+      
+      script.onerror = (error) => {
+        console.error("Failed to load auth module:", error);
+        reject(error);
+      };
+      
+      document.head.appendChild(script);
+    } catch (error) {
+      console.error("Error loading auth module:", error);
+      reject(error);
+    }
+  });
+}
 
 // Function to get the current authentication state
 async function getAuthState() {
@@ -62,46 +104,54 @@ function updateAuthUI(authState) {
 document.addEventListener('DOMContentLoaded', async function() {
   console.log("Popup loaded");
   
-  // First validate stored auth data
-  const isValid = await validateStoredAuth();
-  console.log("Auth validation result:", isValid);
-  
-  // Create auth section in the popup
-  const authSection = document.createElement('div');
-  authSection.id = 'auth-section';
-  authSection.className = 'section';
-  
-  // Get current auth state
-  const authState = await getAuthState();
-  console.log("Auth state:", authState);
-  
-  // Update UI based on auth state
-  updateAuthUI(authState);
-  
-  // Add auth section to popup
-  const firstElement = document.body.firstChild;
-  if (firstElement) {
-    document.body.insertBefore(authSection, firstElement);
-  } else {
-    document.body.appendChild(authSection);
-  }
-  
-  // Set up click handlers
-  document.body.addEventListener('click', async (event) => {
-    if (event.target.id === 'login-button') {
-      console.log("Login button clicked");
-      try {
-        const result = await login();
-        console.log("Login result:", result);
-        if (result && result.success) {
-          updateAuthUI({ isAuthenticated: true, user: result.user });
-        }
-      } catch (error) {
-        console.error("Login error:", error);
-        alert("Login failed: " + error.message);
-      }
+  // First load auth module
+  try {
+    await loadAuthModule();
+    console.log("Auth module loaded successfully");
+    
+    // Now validate stored auth data
+    const isValid = await validateStoredAuth();
+    console.log("Auth validation result:", isValid);
+    
+    // Create auth section in the popup
+    const authSection = document.createElement('div');
+    authSection.id = 'auth-section';
+    authSection.className = 'section';
+    
+    // Get current auth state
+    const authState = await getAuthState();
+    console.log("Auth state:", authState);
+    
+    // Update UI based on auth state
+    updateAuthUI(authState);
+    
+    // Add auth section to popup
+    const firstElement = document.body.firstChild;
+    if (firstElement) {
+      document.body.insertBefore(authSection, firstElement);
+    } else {
+      document.body.appendChild(authSection);
     }
-  });
+    
+    // Set up click handlers
+    document.body.addEventListener('click', async (event) => {
+      if (event.target.id === 'login-button') {
+        console.log("Login button clicked");
+        try {
+          const result = await login();
+          console.log("Login result:", result);
+          if (result && result.success) {
+            updateAuthUI({ isAuthenticated: true, user: result.user });
+          }
+        } catch (error) {
+          console.error("Login error:", error);
+          alert("Login failed: " + error.message);
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error during initialization:", error);
+  }
 });
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -279,11 +329,9 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Handle logout
   function handleLogout() {
-    import('../auth/auth-storage.js').then(module => {
-      module.clearAuth();
-      updateUserInfoSection();
-      showStatus('Logged out successfully', 'info');
-    });
+    clearAuth();
+    updateUserInfoSection();
+    showStatus('Logged out successfully', 'info');
   }
   
   // IMPORTANT: Add direct event listeners to buttons, ensuring they work
@@ -378,7 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
-  // Function to open sidebar - simplified for reliability
+  // Function to open sidebar - enhanced with proper script injection
   async function openAnalysisSidebar() {
     console.log("openAnalysisSidebar function called");
     showStatus('Opening analysis sidebar...', 'info');
@@ -403,25 +451,42 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       
-      // Send message to background script
-      chrome.runtime.sendMessage({ 
-        action: "showSidebar"
-      }, function(response) {
-        console.log("Sidebar response:", response);
+      // First ensure the content script is loaded by injecting it explicitly
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['src/content/content-script.js']
+        });
+        console.log("Content script injected successfully");
         
-        if (chrome.runtime.lastError) {
-          console.error("Message error:", chrome.runtime.lastError);
-          showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
-          return;
-        }
+        // Wait a moment for the script to initialize
+        setTimeout(async () => {
+          try {
+            // Now send the message to show sidebar
+            chrome.tabs.sendMessage(tab.id, { action: "showSidebar" }, (response) => {
+              if (chrome.runtime.lastError) {
+                console.error("Message error:", chrome.runtime.lastError);
+                showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
+                return;
+              }
+              
+              if (response && response.success) {
+                window.close(); // Close the popup
+              } else {
+                const errorMsg = response && response.error ? response.error : 'Unknown error';
+                showStatus('Error: ' + errorMsg, 'error');
+              }
+            });
+          } catch (sendError) {
+            console.error("Error sending message:", sendError);
+            showStatus('Error communicating with page: ' + sendError.message, 'error');
+          }
+        }, 500); // Wait 500ms for script to initialize
         
-        if (response && response.success) {
-          window.close(); // Close the popup
-        } else {
-          const errorMsg = response && response.error ? response.error : 'Unknown error';
-          showStatus('Error: ' + errorMsg, 'error');
-        }
-      });
+      } catch (injectionError) {
+        console.error("Script injection error:", injectionError);
+        showStatus('Error injecting content script: ' + injectionError.message, 'error');
+      }
     } catch (error) {
       console.error("Error in sidebar function:", error);
       showStatus('Error: ' + error.message, 'error');
