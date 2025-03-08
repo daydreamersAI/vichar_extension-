@@ -1,10 +1,17 @@
 // Updated content-script.js with robust authentication integration
-console.log("Chess analyzer content script loaded at:", new Date().toISOString());
+console.log("Chess analyzer content script loading at:", new Date().toISOString());
 
 // Create a global namespace for our functions
 window.chessAnalyzerApp = window.chessAnalyzerApp || {};
+window.chessAnalyzerExtension = window.chessAnalyzerExtension || {};
 
-// Auth module reference
+// Create a variable to track if we've already initialized
+window.chessSidebarInitialized = window.chessSidebarInitialized || false;
+
+// Set API URL globally if not already set
+window.API_URL = window.API_URL || "https://api.beekayprecision.com";
+
+// Auth module reference - declare only once
 let authModule = null;
 
 // Define placeholder auth functions until the module loads
@@ -47,62 +54,65 @@ let openPaymentPage = () => Promise.reject(new Error("Auth module not loaded"));
 let getCreditPackages = () => Promise.reject(new Error("Auth module not loaded"));
 let updateUserData = () => false;
 
-// Load the auth module using a more robust method
-function loadAuthModule() {
-  return new Promise((resolve, reject) => {
-    try {
-      // First check if it's already in the global namespace
-      if (window.chessAuthModule) {
-        console.log("Auth module already available in global namespace");
-        authModule = window.chessAuthModule;
-        assignAuthFunctions(authModule);
-        resolve(authModule);
-        return;
-      }
-      
-      // Otherwise, load it dynamically
-      const authScriptUrl = chrome.runtime.getURL('src/auth/auth-connector.js');
-      
-      console.log("Loading auth module from:", authScriptUrl);
-      
-      // Create script element
-      const script = document.createElement('script');
-      script.src = authScriptUrl;
-      script.type = 'text/javascript';
-      
-      // When script loads, the module will be available in window.chessAuthModule
-      script.onload = () => {
-        console.log("Auth script loaded successfully");
-        
-        // Wait a brief moment for initialization
-        setTimeout(() => {
-          if (window.chessAuthModule) {
-            console.log("Auth module available after script load");
-            authModule = window.chessAuthModule;
-            assignAuthFunctions(authModule);
-            resolve(authModule);
-          } else {
-            const error = new Error("Auth module not available after script load");
-            console.error(error);
-            reject(error);
-          }
-        }, 100);
-      };
-      
-      script.onerror = (event) => {
-        const error = new Error("Failed to load auth script");
-        console.error("Script load error:", event);
-        reject(error);
-      };
-      
-      // Add script to page
-      document.head.appendChild(script);
-      
-    } catch (error) {
-      console.error("Error in loadAuthModule:", error);
-      reject(error);
+// Completely revise loadAuthModule function for maximum reliability
+async function loadAuthModule() {
+  try {
+    // First check if it's already loaded - simplify the check
+    if (window.chessAuthModule) {
+      console.log("Auth module already available");
+      window.chessAuthModule.isInitialized = true; // Force it to be initialized
+      return window.chessAuthModule;
     }
-  });
+
+    // Create a simplified auth module directly in the content script as fallback
+    window.chessAuthModule = window.chessAuthModule || {
+      isInitialized: true,
+      isAuthenticated: async function() { 
+        try {
+          const authStr = localStorage.getItem('chess_assistant_auth');
+          return !!authStr && !!JSON.parse(authStr).token;
+        } catch (e) { return false; }
+      },
+      isAuthenticatedSync: function() {
+        try {
+          const authStr = localStorage.getItem('chess_assistant_auth');
+          return !!authStr && !!JSON.parse(authStr).token;
+        } catch (e) { return false; }
+      },
+      getCurrentUser: function() {
+        try {
+          const authStr = localStorage.getItem('chess_assistant_auth');
+          return authStr ? JSON.parse(authStr).user : null;
+        } catch (e) { return null; }
+      },
+      getAuthToken: function() {
+        try {
+          const authStr = localStorage.getItem('chess_assistant_auth');
+          return authStr ? JSON.parse(authStr).token : null;
+        } catch (e) { return null; }
+      },
+      clearAuth: function() {
+        localStorage.removeItem('chess_assistant_auth');
+        localStorage.removeItem('chess_assistant_token');
+      }
+    };
+    
+    // Now try to load the actual auth script
+    console.log("Loading auth script");
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('src/auth/auth-storage.js');
+    script.type = 'text/javascript';
+    
+    // Use a simpler approach to loading
+    document.head.appendChild(script);
+    
+    // Return the basic module immediately instead of waiting
+    return window.chessAuthModule;
+  } catch (error) {
+    console.error("Error in loadAuthModule:", error);
+    // Return a basic auth module as fallback
+    return window.chessAuthModule;
+  }
 }
 
 // Assign auth functions from the module
@@ -133,7 +143,7 @@ let sidebarInitialized = false;
 let sidebarVisible = false;
 
 // API configuration
-const API_URL = "https://api.beekayprecision.com";
+// const API_URL = "https://api.beekayprecision.com";
 
 // Ensure the toggle button is visible
 function ensureToggleButtonVisible() {
@@ -157,474 +167,105 @@ function ensureToggleButtonVisible() {
 }
 
 // Function to create and initialize the sidebar
-function initializeSidebar() {
-  if (sidebarInitialized) {
-    return; // Don't initialize twice
-  }
-  
-  console.log("Initializing sidebar elements");
-  
-  // Create the sidebar element
-  const sidebar = document.createElement('div');
-  sidebar.id = 'chess-analysis-sidebar';
-  sidebar.style.cssText = `
-    position: fixed;
-    top: 0;
-    right: -400px; /* Start off-screen */
-    width: 380px;
-    height: 100vh;
-    background-color: #f8f9fa;
-    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.2);
-    z-index: 9999;
-    overflow-y: auto;
-    transition: right 0.3s ease;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    padding: 10px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-  `;
-  
-  // Create toggle button
-  const toggleButton = document.createElement('div');
-  toggleButton.id = 'sidebar-toggle';
-  toggleButton.style.cssText = `
-    position: fixed;
-    top: 50%;
-    right: 0;
-    width: 30px;
-    height: 60px;
-    background-color: #4285f4;
-    border-radius: 5px 0 0 5px;
-    cursor: pointer;
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
-  `;
-  toggleButton.innerHTML = '<span style="color: white; transform: rotate(-90deg);">▲</span>';
-  toggleButton.addEventListener('click', toggleSidebar);
-  
-  // Create the sidebar content
-  const content = document.createElement('div');
-  content.style.cssText = `
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-  `;
-  
-  // Header
-  const header = document.createElement('div');
-  header.style.cssText = `
-    padding-bottom: 10px;
-    border-bottom: 1px solid #ddd;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `;
-  header.innerHTML = '<h2 style="margin: 0; color: #333;">Chess Analysis</h2>';
-  
-  // Close button
-  const closeButton = document.createElement('button');
-  closeButton.textContent = 'X';
-  closeButton.style.cssText = `
-    background: none;
-    border: none;
-    font-size: 16px;
-    cursor: pointer;
-    color: #555;
-  `;
-  closeButton.addEventListener('click', toggleSidebar);
-  header.appendChild(closeButton);
-  
-  // Add user info panel
-  const userInfoPanel = document.createElement('div');
-  userInfoPanel.id = 'user-info-panel';
-  userInfoPanel.style.cssText = `
-    background-color: white;
-    padding: 10px;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    margin-bottom: 10px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `;
-  
-  // Update the user panel based on auth state
-  updateUserPanel(userInfoPanel);
-  
-  // Question input
-  const questionContainer = document.createElement('div');
-  questionContainer.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 10px;
-    background-color: white;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  `;
-  
-  const questionLabel = document.createElement('label');
-  questionLabel.textContent = 'Ask about this position:';
-  questionLabel.style.cssText = `
-    font-weight: 600;
-    color: #333;
-    font-size: 14px;
-  `;
-  
-  const questionInput = document.createElement('textarea');
-  questionInput.id = 'question-input';
-  questionInput.placeholder = 'Example: What is the best move for white?';
-  questionInput.style.cssText = `
-    width: 100%;
-    height: 80px;
-    padding: 12px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    resize: vertical;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    font-size: 14px;
-    line-height: 1.4;
-    color: #333;
-  `;
-  
-  // Add the AI vision toggle
-  const aiVisionContainer = document.createElement('div');
-  aiVisionContainer.style.cssText = `
-    display: flex;
-    align-items: center;
-    margin-top: 5px;
-    gap: 8px;
-  `;
-  
-  const aiVisionToggle = document.createElement('input');
-  aiVisionToggle.type = 'checkbox';
-  aiVisionToggle.id = 'ai-vision-toggle';
-  aiVisionToggle.checked = true; // Default to using vision
-  aiVisionToggle.style.cssText = `
-    margin: 0;
-  `;
-  
-  const aiVisionLabel = document.createElement('label');
-  aiVisionLabel.htmlFor = 'ai-vision-toggle';
-  aiVisionLabel.textContent = 'Use AI Vision for board analysis';
-  aiVisionLabel.style.cssText = `
-    font-size: 13px;
-    color: #555;
-    cursor: pointer;
-  `;
-  
-  aiVisionContainer.appendChild(aiVisionToggle);
-  aiVisionContainer.appendChild(aiVisionLabel);
-  
-  const askButton = document.createElement('button');
-  askButton.textContent = 'Ask Question';
-  askButton.id = 'ask-question-btn';
-  askButton.style.cssText = `
-    padding: 10px 16px;
-    background-color: #4285f4;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    align-self: flex-start;
-    transition: background-color 0.2s;
-  `;
-  askButton.addEventListener('mouseenter', () => {
-    askButton.style.backgroundColor = '#3367d6';
-  });
-  askButton.addEventListener('mouseleave', () => {
-    askButton.style.backgroundColor = '#4285f4';
-  });
-  askButton.addEventListener('click', () => {
-    if (isAuthenticated()) {
-      const user = getCurrentUser();
-      if (user && user.credits > 0) {
-        askQuestion();
-      } else {
-        showInsufficientCreditsWarning();
-      }
-    } else {
-      showLoginPrompt();
+async function initializeSidebar() {
+  try {
+    console.log("Starting sidebar initialization");
+    
+    // Check if sidebar already exists
+    if (document.getElementById('chess-analysis-sidebar')) {
+      console.log("Sidebar already exists, skipping initialization");
+      sidebarInitialized = true;
+      return;
     }
-  });
-  
-  questionContainer.appendChild(questionLabel);
-  questionContainer.appendChild(questionInput);
-  questionContainer.appendChild(aiVisionContainer);
-  questionContainer.appendChild(askButton);
-  
-  // Response area
-  const responseContainer = document.createElement('div');
-  responseContainer.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    flex: 0 0 auto;
-    margin-bottom: 15px;
-  `;
-  
-  const responseLabel = document.createElement('label');
-  responseLabel.textContent = 'Analysis:';
-  responseLabel.style.cssText = `
-    font-weight: 600;
-    color: #333;
-    font-size: 14px;
-  `;
-  
-  const responseArea = document.createElement('div');
-  responseArea.id = 'response-area';
-  responseArea.style.cssText = `
-    padding: 15px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    background-color: white;
-    min-height: 120px;
-    max-height: 200px;
-    overflow-y: auto;
-    line-height: 1.5;
-    color: #333;
-    font-size: 14px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  `;
-  responseArea.textContent = 'Capture a position to begin analysis.';
-  
-  responseContainer.appendChild(responseLabel);
-  responseContainer.appendChild(responseArea);
-  
-  // Capture button
-  const captureButton = document.createElement('button');
-  captureButton.textContent = 'Capture Current Position';
-  captureButton.style.cssText = `
-    padding: 10px 16px;
-    background-color: #34a853;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    width: 100%;
-    transition: background-color 0.2s;
-    margin-bottom: 10px;
-  `;
-  captureButton.addEventListener('mouseenter', () => {
-    captureButton.style.backgroundColor = '#2d9249';
-  });
-  captureButton.addEventListener('mouseleave', () => {
-    captureButton.style.backgroundColor = '#34a853';
-  });
-  captureButton.addEventListener('click', captureCurrentPosition);
-  
-  // Image container
-  const imageContainer = document.createElement('div');
-  imageContainer.style.cssText = `
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    background-color: white;
-    padding: 10px;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  `;
-  const capturedImage = document.createElement('img');
-  capturedImage.id = 'captured-board-image';
-  capturedImage.style.cssText = `
-    max-width: 100%;
-    max-height: 300px;
-    display: none;
-    border-radius: 4px;
-  `;
-  imageContainer.appendChild(capturedImage);
-  
-  // Game info container
-  const gameInfoContainer = document.createElement('div');
-  gameInfoContainer.id = 'game-info-container';
-  gameInfoContainer.style.cssText = `
-    width: 100%;
-    background-color: white;
-    padding: 12px;
-    border-radius: 8px;
-    display: none;
-    flex-direction: column;
-    gap: 10px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  `;
-  
-  // FEN display
-  const fenContainer = document.createElement('div');
-  fenContainer.style.cssText = `
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
-    word-break: break-all;
-    background-color: #f5f5f5;
-    padding: 8px;
-    border-radius: 4px;
-    border: 1px solid #e0e0e0;
-  `;
-  const fenLabel = document.createElement('div');
-  fenLabel.textContent = 'FEN:';
-  fenLabel.style.cssText = `
-    font-weight: 600;
-    margin-bottom: 4px;
-    color: #333;
-  `;
-  const fenValue = document.createElement('div');
-  fenValue.id = 'fen-value';
-  fenValue.textContent = '';
-  fenValue.style.cssText = `
-    line-height: 1.4;
-  `;
-  fenContainer.appendChild(fenLabel);
-  fenContainer.appendChild(fenValue);
-  
-  // PGN display (collapsible)
-  const pgnContainer = document.createElement('div');
-  pgnContainer.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  `;
-  
-  const pgnHeader = document.createElement('div');
-  pgnHeader.style.cssText = `
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    padding: 8px;
-    background-color: #f0f0f0;
-    border-radius: 4px;
-  `;
-  
-  const pgnLabel = document.createElement('div');
-  pgnLabel.textContent = 'PGN (Game Moves)';
-  pgnLabel.style.cssText = `
-    font-weight: 600;
-    color: #333;
-  `;
-  
-  const pgnToggle = document.createElement('span');
-  pgnToggle.textContent = '▼';
-  pgnToggle.style.transition = 'transform 0.3s';
-  
-  pgnHeader.appendChild(pgnLabel);
-  pgnHeader.appendChild(pgnToggle);
-  
-  const pgnContent = document.createElement('div');
-  pgnContent.id = 'pgn-value';
-  pgnContent.style.cssText = `
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
-    white-space: pre-wrap;
-    word-break: break-all;
-    background-color: #f5f5f5;
-    padding: 8px;
-    border-radius: 4px;
-    border: 1px solid #e0e0e0;
-    max-height: 150px;
-    overflow-y: auto;
-    display: none;
-    line-height: 1.4;
-  `;
-  
-  // Toggle PGN visibility when header is clicked
-  pgnHeader.addEventListener('click', () => {
-    const isVisible = pgnContent.style.display !== 'none';
-    pgnContent.style.display = isVisible ? 'none' : 'block';
-    pgnToggle.style.transform = isVisible ? 'rotate(0deg)' : 'rotate(180deg)';
-  });
-  
-  pgnContainer.appendChild(pgnHeader);
-  pgnContainer.appendChild(pgnContent);
-  
-  // Add game info components to the container
-  gameInfoContainer.appendChild(fenContainer);
-  gameInfoContainer.appendChild(pgnContainer);
-  
-  // Credit packages container
-  const creditPackagesContainer = document.createElement('div');
-  creditPackagesContainer.id = 'credit-packages-container';
-  creditPackagesContainer.style.cssText = `
-    width: 100%;
-    background-color: white;
-    padding: 12px;
-    border-radius: 8px;
-    margin-top: 15px;
-    display: none;
-    flex-direction: column;
-    gap: 10px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  `;
-  
-  const packagesHeader = document.createElement('div');
-  packagesHeader.textContent = 'Add More Credits';
-  packagesHeader.style.cssText = `
-    font-weight: 600;
-    color: #333;
-    font-size: 16px;
-    margin-bottom: 10px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `;
-  
-  // Add close button for packages
-  const closePackagesBtn = document.createElement('button');
-  closePackagesBtn.textContent = 'X';
-  closePackagesBtn.style.cssText = `
-    background: none;
-    border: none;
-    font-size: 16px;
-    cursor: pointer;
-    color: #555;
-  `;
-  closePackagesBtn.addEventListener('click', () => {
-    creditPackagesContainer.style.display = 'none';
-  });
-  
-  packagesHeader.appendChild(closePackagesBtn);
-  creditPackagesContainer.appendChild(packagesHeader);
-  
-  // Package buttons container
-  const packageButtonsContainer = document.createElement('div');
-  packageButtonsContainer.id = 'package-buttons';
-  packageButtonsContainer.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  `;
-  
-  creditPackagesContainer.appendChild(packageButtonsContainer);
-  
-  // Assemble the content
-  content.appendChild(header);
-  content.appendChild(userInfoPanel);     // User info panel
-  content.appendChild(questionContainer);  // Question input
-  content.appendChild(responseContainer);  // Response area
-  content.appendChild(captureButton);      // Capture button
-  content.appendChild(imageContainer);     // Captured image
-  content.appendChild(gameInfoContainer);  // Game info (FEN/PGN)
-  content.appendChild(creditPackagesContainer); // Credit packages
-  
-  // Add content to sidebar
-  sidebar.appendChild(content);
-  
-  // Add the sidebar and toggle button to the page
-  document.body.appendChild(sidebar);
-  document.body.appendChild(toggleButton);
-  
-  sidebarInitialized = true;
-  console.log("Sidebar elements created successfully");
-  
-  // Check if we need to load credit packages
-  checkAuthAndLoadPackages();
+    
+    // Create sidebar container if it doesn't exist
+    const sidebar = document.createElement('div');
+    sidebar.id = 'chess-analysis-sidebar';
+    sidebar.className = 'chess-analysis-sidebar';
+    
+    // Add basic styling
+    sidebar.style.position = 'fixed';
+    sidebar.style.top = '0';
+    sidebar.style.right = '-400px'; // Start off-screen
+    sidebar.style.width = '400px';
+    sidebar.style.height = '100%';
+    sidebar.style.backgroundColor = 'white';
+    sidebar.style.boxShadow = '-2px 0 5px rgba(0,0,0,0.2)';
+    sidebar.style.zIndex = '9999';
+    sidebar.style.transition = 'right 0.3s ease';
+    sidebar.style.display = 'flex';
+    sidebar.style.flexDirection = 'column';
+    sidebar.style.overflow = 'hidden';
+    
+    // Create sidebar content
+    sidebar.innerHTML = `
+      <div class="sidebar-header" style="padding: 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0; font-size: 18px;">Chess Analysis</h2>
+        <button id="sidebar-close" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+      </div>
+      <div id="user-info-panel" style="padding: 16px; border-bottom: 1px solid #eee;"></div>
+      <div class="sidebar-content" style="flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column;">
+        <div class="input-container" style="margin-bottom: 16px;">
+          <input id="question-input" type="text" placeholder="Ask about this position..." 
+                 style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+        </div>
+        <button id="ask-button" style="padding: 8px 16px; background-color: #4285f4; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 16px;">
+          Ask
+        </button>
+        <div id="response-area" style="flex: 1; border: 1px solid #eee; border-radius: 4px; padding: 16px; overflow-y: auto;">
+          <p>Ask a question about the current chess position.</p>
+        </div>
+      </div>
+    `;
+    
+    // Add to document
+    document.body.appendChild(sidebar);
+    console.log("Sidebar element created and added to document");
+    
+    // Add event listeners
+    const closeButton = sidebar.querySelector('#sidebar-close');
+    if (closeButton) {
+      closeButton.addEventListener('click', () => {
+        console.log("Close button clicked");
+        sidebar.style.right = '-400px';
+        sidebarVisible = false;
+      });
+    }
+    
+    // Add ask button functionality
+    const askButton = sidebar.querySelector('#ask-button');
+    const questionInput = sidebar.querySelector('#question-input');
+    const responseArea = sidebar.querySelector('#response-area');
+    
+    if (askButton && questionInput && responseArea) {
+      askButton.addEventListener('click', () => {
+        handleQuestionSubmit(questionInput, responseArea);
+      });
+      
+      // Also listen for Enter key
+      questionInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          handleQuestionSubmit(questionInput, responseArea);
+        }
+      });
+    }
+    
+    // Update the user panel
+    const userInfoPanel = sidebar.querySelector('#user-info-panel');
+    if (userInfoPanel) {
+      updateUserPanel(userInfoPanel);
+    }
+    
+    // Add toggle button if not already present
+    ensureToggleButtonVisible();
+    
+    sidebarInitialized = true;
+    console.log("Sidebar fully initialized");
+    
+  } catch (error) {
+    console.error("Error initializing sidebar:", error);
+    throw error;
+  }
 }
 
 // Function to check auth and load packages if authenticated
@@ -647,84 +288,45 @@ function toggleSidebar() {
 
 // Function to update user panel
 function updateUserPanel(panel) {
-  console.log("Updating user panel, authenticated:", isAuthenticated());
+  console.log("Updating user panel");
   
-  if (isAuthenticated()) {
-    const user = getCurrentUser();
-    console.log("Current user:", user);
-    
-    // Update panel content for logged-in user
-    panel.innerHTML = `
-      <div style="flex: 1;">
-        <div style="font-weight: 600; font-size: 14px;">${user?.full_name || user?.email || 'User'}</div>
-        <div style="display: flex; align-items: center; margin-top: 5px;">
-          <span style="color: #34a853; font-weight: 600;">${user?.credits || 0}</span>
-          <span style="margin-left: 5px; font-size: 13px; color: #555;">credits</span>
-        </div>
-      </div>
-      <button id="buy-credits-btn" style="
-        padding: 6px 12px;
-        background-color: #fbbc05;
-        color: #333;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-      ">Buy Credits</button>
-    `;
-    
-    // Add event listener for the buy credits button
-    setTimeout(() => {
-      const buyCreditsBtn = document.getElementById('buy-credits-btn');
-      if (buyCreditsBtn) {
-        buyCreditsBtn.addEventListener('click', () => {
-          toggleCreditPackages();
-        });
+  try {
+    // Use safely scoped function
+    if (window.chessAuthModule && window.chessAuthModule.isAuthenticatedSync) {
+      const isAuth = window.chessAuthModule.isAuthenticatedSync();
+      const user = window.chessAuthModule.getCurrentUser();
+      window.chessAnalyzerExtension.updateUserInfoSection(isAuth, user);
+    } else {
+      // Fallback to checking localStorage
+      let isAuth = false;
+      let user = null;
+      
+      try {
+        const authStr = localStorage.getItem('chess_assistant_auth');
+        if (authStr) {
+          const authData = JSON.parse(authStr);
+          isAuth = !!authData && !!authData.token;
+          user = authData.user;
+        }
+      } catch (e) {
+        console.error("Error checking localStorage:", e);
       }
-    }, 0);
-    
-  } else {
-    // Update panel content for logged-out user
-    panel.innerHTML = `
-      <div style="flex: 1;">
-        <div style="font-weight: 600; font-size: 14px;">Not logged in</div>
-        <div style="font-size: 13px; color: #555; margin-top: 5px;">Login to use AI chess analysis</div>
-      </div>
-      <button id="login-btn" style="
-        padding: 6px 12px;
-        background-color: #4285f4;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-      ">Login with Google</button>
-    `;
-    
-    // Add event listener for the login button
-    setTimeout(() => {
-      const loginBtn = document.getElementById('login-btn');
-      if (loginBtn) {
-        loginBtn.addEventListener('click', handleLogin);
-      }
-    }, 0);
-    
-    // Hide credit packages when logged out
-    const creditPackagesContainer = document.getElementById('credit-packages-container');
-    if (creditPackagesContainer) {
-      creditPackagesContainer.style.display = 'none';
+      
+      window.chessAnalyzerExtension.updateUserInfoSection(isAuth, user);
     }
+  } catch (error) {
+    console.error("Error in updateUserPanel:", error);
+    panel.innerHTML = `
+      <div class="user-status-loading">
+        <p>Error checking login status</p>
+      </div>
+    `;
   }
-  
-  // Update ask button state
-  updateAskButtonState();
 }
 
 // Function to update ask button state
 function updateAskButtonState() {
-  const askButton = document.getElementById('ask-question-btn');
+  const askButton = document.getElementById('ask-button');
   if (!askButton) return;
   
   if (isAuthenticated()) {
@@ -1092,7 +694,30 @@ function getBase64FromImageSrc(src) {
   return null;
 }
 
-// Function to capture the current chess position
+// Add this function to safely access chrome.storage
+function safelyGetStorage(keys) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(keys, (result) => {
+          if (chrome.runtime.lastError) {
+            console.error("Storage error:", chrome.runtime.lastError);
+            reject(chrome.runtime.lastError);
+          } else {
+            resolve(result);
+          }
+        });
+      } else {
+        reject(new Error("Chrome storage not available"));
+      }
+    } catch (error) {
+      console.error("Error accessing storage:", error);
+      reject(error);
+    }
+  });
+}
+
+// Update the captureCurrentPosition function
 function captureCurrentPosition() {
   console.log("Capturing current position for sidebar");
   const responseArea = document.getElementById('response-area');
@@ -1100,274 +725,96 @@ function captureCurrentPosition() {
     responseArea.textContent = 'Capturing chess position...';
   }
   
-  try {
-    // Send a message to the background script to handle the capture
-    chrome.runtime.sendMessage({ 
-      action: "captureBoardForSidebar"
-    }, (response) => {
-      // Check for runtime errors
-      if (chrome.runtime.lastError) {
-        console.error("Runtime error in capture:", chrome.runtime.lastError);
-        if (responseArea) {
-          responseArea.textContent = 'Error: ' + chrome.runtime.lastError.message;
-        }
-        return;
-      }
-      
-      console.log("Capture response:", response);
-      
-      if (response && response.success) {
-        // Load the newly captured board
-        loadStoredBoardData();
+  // Use the safe message function
+  return safelySendMessage({ 
+    action: "captureBoardForSidebar"
+  }).then(response => {
+    console.log("Capture response:", response);
+    
+    if (response && response.success) {
+      // Load the newly captured board
+      return loadStoredBoardData().then(() => {
         if (responseArea) {
           responseArea.textContent = 'Position captured! Ask a question about this position.';
         }
-      } else {
-        const errorMsg = response && response.error ? response.error : 'Unknown error';
-        if (responseArea) {
-          responseArea.textContent = 'Error capturing position: ' + errorMsg;
-        }
+        return response.capturedBoard || {};
+      });
+    } else {
+      const errorMsg = response && response.error ? response.error : 'Unknown error';
+      if (responseArea) {
+        responseArea.textContent = 'Error capturing position: ' + errorMsg;
       }
-    });
-  } catch (error) {
+      throw new Error(errorMsg);
+    }
+  }).catch(error => {
     console.error("Error capturing position:", error);
     if (responseArea) {
       responseArea.textContent = 'Error: ' + error.message;
     }
-  }
-}
-
-// Function to ask a question about the position
-function askQuestion() {
-  const questionInput = document.getElementById('question-input');
-  const responseArea = document.getElementById('response-area');
-  const aiVisionToggle = document.getElementById('ai-vision-toggle');
-  
-  if (!questionInput || !responseArea) {
-    console.error("Question input or response area not found");
-    return;
-  }
-  
-  const question = questionInput.value.trim();
-  
-  if (!question) {
-    responseArea.textContent = "Please enter a question about the position.";
-    return;
-  }
-  
-  // Show loading indicator
-  responseArea.innerHTML = `
-    <div style="display: flex; align-items: center; justify-content: center; height: 100px;">
-      <div style="display: inline-block; border-radius: 50%; border: 3px solid #4285f4; 
-           border-top-color: transparent; width: 24px; height: 24px; animation: spin 1s linear infinite;"></div>
-      <div style="margin-left: 15px; font-weight: 500;">Analyzing position...</div>
-    </div>
-    <style>
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-    </style>
-  `;
-  
-  // Check if we have a captured board
-  chrome.storage.local.get(['capturedBoard'], async (result) => {
-    const capturedBoard = result.capturedBoard;
-    
-    if (!capturedBoard) {
-      responseArea.textContent = "Please capture a chess position first.";
-      return;
-    }
-    
-    // Determine if we should use vision
-    const useVision = aiVisionToggle && aiVisionToggle.checked;
-    
-    try {
-      // Get auth token
-      const auth = getAuthToken();
-      console.log("Using auth token:", auth ? "Present" : "Not available");
-      
-      // Send request to background script to handle API call
-      chrome.runtime.sendMessage({
-        action: "analyzeChessPosition",
-        question: question,
-        capturedBoard: capturedBoard,
-        useVision: useVision,
-        authToken: auth
-      }, (response) => {
-        // Check for runtime errors
-        if (chrome.runtime.lastError) {
-          console.error("Runtime error in analysis:", chrome.runtime.lastError);
-          responseArea.innerHTML = `
-            <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
-              <strong>Error:</strong> ${chrome.runtime.lastError.message}
-            </div>
-          `;
-          return;
-        }
-        
-        console.log("Analysis response:", response);
-        
-        if (response && response.success) {
-          // Check if user info was returned (to update credit count)
-          if (response.user) {
-            console.log("Updating user data with:", response.user);
-            
-            // Update user data
-            if (authModule && authModule.updateUserData) {
-              authModule.updateUserData(response.user);
-            } else {
-              // Fallback: update directly in auth state
-              const authData = window.chessAuthModule && window.chessAuthModule.getAuthData();
-              if (authData) {
-                authData.user = response.user;
-                localStorage.setItem('chess_assistant_auth', JSON.stringify(authData));
-              }
-            }
-            
-            // Update UI
-            const userInfoPanel = document.getElementById('user-info-panel');
-            if (userInfoPanel) {
-              updateUserPanel(userInfoPanel);
-            }
-          }
-          
-          // Format the response with better styling
-          const formattedResponse = formatAPIResponse(response.data);
-          responseArea.innerHTML = formattedResponse;
-        } else {
-          // Handle specific error cases
-          const errorMsg = response?.error || "Unknown error";
-          
-          if (errorMsg.includes("Authentication required")) {
-            // Authentication error
-            responseArea.innerHTML = `
-              <div style="padding: 15px; text-align: center;">
-                <div style="font-weight: 600; font-size: 16px; margin-bottom: 10px;">Authentication Required</div>
-                <p>Your session has expired. Please login again to continue.</p>
-                <button id="relogin-btn" style="
-                  padding: 8px 16px;
-                  background-color: #4285f4;
-                  color: white;
-                  border: none;
-                  border-radius: 4px;
-                  cursor: pointer;
-                  font-size: 14px;
-                  font-weight: 500;
-                  margin-top: 10px;
-                ">Login Again</button>
-              </div>
-            `;
-            
-            setTimeout(() => {
-              const reloginBtn = document.getElementById('relogin-btn');
-              if (reloginBtn) {
-                reloginBtn.addEventListener('click', handleLogin);
-              }
-            }, 0);
-          } else if (errorMsg.includes("Insufficient credits")) {
-            // Insufficient credits
-            showInsufficientCreditsWarning();
-          } else {
-            // General error
-            responseArea.innerHTML = `
-              <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
-                <strong>Error:</strong> ${errorMsg}
-              </div>
-            `;
-          }
-        }
-      });
-    } catch (error) {
-      console.error("Error in ask question flow:", error);
-      responseArea.innerHTML = `
-        <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
-          <strong>Error:</strong> ${error.message}
-        </div>
-      `;
-    }
+    throw error;
   });
 }
 
-// Function to format API responses with better styling
-function formatAPIResponse(response) {
-  if (!response) return "No response from the server";
-  
-  // Replace newlines with HTML line breaks
-  let formatted = response.replace(/\n/g, '<br>');
-  
-  // Bold key terms
-  formatted = formatted.replace(/(best move|advantage|winning|check|mate|fork|pin|skewer|discovered attack|zwischenzug|tempo|initiative|development|center control|king safety|pawn structure)/gi, 
-    '<strong>$1</strong>');
-  
-  // Highlight chess moves (like e4, Nf3, etc.)
-  formatted = formatted.replace(/\b([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[\+#]?)\b/g, 
-    '<span style="color: #1a73e8; font-weight: 500;">$1</span>');
-  
-  // Highlight evaluations (+1.5, -0.7, etc.)
-  formatted = formatted.replace(/(\+|-)\d+\.?\d*/g, 
-    '<span style="color: #188038; font-weight: 500;">         const</span>');
-  
-  return formatted;
-}
-
-// Function to load stored board data
+// Update the loadStoredBoardData function
 async function loadStoredBoardData() {
   try {
-    chrome.storage.local.get(['capturedBoard'], (result) => {
-      const capturedBoard = result.capturedBoard;
-      const capturedImage = document.getElementById('captured-board-image');
-      const gameInfoContainer = document.getElementById('game-info-container');
-      const fenValue = document.getElementById('fen-value');
-      const pgnValue = document.getElementById('pgn-value');
+    const result = await safelyGetStorage(['capturedBoard']);
+    const capturedBoard = result.capturedBoard;
+    const capturedImage = document.getElementById('captured-board-image');
+    const gameInfoContainer = document.getElementById('game-info-container');
+    const fenValue = document.getElementById('fen-value');
+    const pgnValue = document.getElementById('pgn-value');
+    
+    if (capturedBoard && capturedBoard.imageData && capturedImage) {
+      console.log("Loaded stored board data");
+      console.log("FEN data:", capturedBoard.fen);
       
-      if (capturedBoard && capturedBoard.imageData && capturedImage) {
-        console.log("Loaded stored board data");
-        console.log("FEN data:", capturedBoard.fen);
+      // Update the image
+      capturedImage.src = capturedBoard.imageData;
+      capturedImage.style.display = 'block';
+      
+      // Update game info if available
+      if (gameInfoContainer) {
+        gameInfoContainer.style.display = 'flex';
         
-        // Update the image
-        capturedImage.src = capturedBoard.imageData;
-        capturedImage.style.display = 'block';
+        // Update FEN
+        if (fenValue && capturedBoard.fen) {
+          fenValue.textContent = capturedBoard.fen;
+        }
         
-        // Update game info if available
-        if (gameInfoContainer) {
-          gameInfoContainer.style.display = 'flex';
-          
-          // Update FEN
-          if (fenValue && capturedBoard.fen) {
-            fenValue.textContent = capturedBoard.fen;
+        // Update PGN
+        if (pgnValue) {
+          // Make sure we have PGN data
+          if (capturedBoard.pgn && capturedBoard.pgn.trim().length > 0) {
+            console.log("Displaying PGN in sidebar");
+            pgnValue.textContent = capturedBoard.pgn;
+            pgnValue.style.display = 'block';
+          } else {
+            console.log("No PGN data to display");
+            pgnValue.textContent = "No move history available";
+            pgnValue.style.display = 'block';
           }
-          
-          // Update PGN
-          if (pgnValue) {
-            // Make sure we have PGN data
-            if (capturedBoard.pgn && capturedBoard.pgn.trim().length > 0) {
-              console.log("Displaying PGN in sidebar");
-              pgnValue.textContent = capturedBoard.pgn;
-              pgnValue.style.display = 'block';
-            } else {
-              console.log("No PGN data to display");
-              pgnValue.textContent = "No move history available";
-              pgnValue.style.display = 'block';
-            }
-          }
-        }
-      } else {
-        console.log("No stored board data found");
-        if (capturedImage) {
-          capturedImage.style.display = 'none';
-        }
-        if (gameInfoContainer) {
-          gameInfoContainer.style.display = 'none';
-        }
-        const responseArea = document.getElementById('response-area');
-        if (responseArea) {
-          responseArea.textContent = 'Capture a position to begin analysis.';
         }
       }
-    });
+      
+      return capturedBoard;
+    } else {
+      console.log("No stored board data found");
+      if (capturedImage) {
+        capturedImage.style.display = 'none';
+      }
+      if (gameInfoContainer) {
+        gameInfoContainer.style.display = 'none';
+      }
+      const responseArea = document.getElementById('response-area');
+      if (responseArea) {
+        responseArea.textContent = 'Capture a position to begin analysis.';
+      }
+      return null;
+    }
   } catch (error) {
     console.error("Error loading stored board data:", error);
+    return null;
   }
 }
 
@@ -1382,36 +829,114 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   
+  // Only process sidebar requests on chess sites
   if (request.action === "showSidebar") {
     console.log("Show sidebar request received");
     
-    try {
-      // Initialize the sidebar if not already done
-      if (!sidebarInitialized) {
-        initializeSidebar();
-      }
-      
-      // Show the sidebar
-      sidebarVisible = true;
-      const sidebar = document.getElementById('chess-analysis-sidebar');
-      if (sidebar) {
-        sidebar.style.right = '0';
-        console.log("Sidebar displayed");
-        
-        // Make sure the toggle button is visible
-        ensureToggleButtonVisible();
-      } else {
-        console.error("Sidebar element not found");
-        sendResponse({ success: false, error: "Sidebar element not found" });
-        return true;
-      }
-      
-      sendResponse({ success: true });
-    } catch (error) {
-      console.error("Error showing sidebar:", error);
-      sendResponse({ success: false, error: error.message });
+    // Check if we're on a chess site
+    if (!isChessSite()) {
+      console.log("Not on a chess site, can't show sidebar");
+      sendResponse({ 
+        success: false, 
+        error: "Not on a supported chess site (Chess.com or Lichess)" 
+      });
+      return true;
     }
     
+    // Handle async operations with a promise chain instead of await
+    const handleShowSidebar = async () => {
+      try {
+        console.log("Starting sidebar initialization");
+        
+        // Make sure auth is initialized first
+        let authInitialized = false;
+        try {
+          const authModule = await initializeAuth();
+          authInitialized = !!authModule;
+          console.log("Auth initialized:", authInitialized);
+        } catch (authError) {
+          console.error("Auth initialization error:", authError);
+          // Continue anyway, we'll show login UI
+        }
+        
+        // Initialize the sidebar if not already done
+        if (!sidebarInitialized) {
+          console.log("Sidebar not initialized, initializing now");
+          await initializeSidebar();
+          console.log("Sidebar initialized:", sidebarInitialized);
+        } else {
+          console.log("Sidebar already initialized");
+        }
+        
+        // Show the sidebar
+        sidebarVisible = true;
+        const sidebar = document.getElementById('chess-analysis-sidebar');
+        if (sidebar) {
+          console.log("Sidebar element found, displaying it");
+          
+          // Make sure the sidebar is visible with multiple style properties
+          sidebar.style.right = '0';
+          sidebar.style.display = 'flex';
+          sidebar.style.visibility = 'visible';
+          sidebar.style.opacity = '1';
+          sidebar.style.zIndex = '9999';
+          
+          // Make sure toggle button is visible
+          ensureToggleButtonVisible();
+          
+          // Update user panel with fallback handling
+          const userInfoPanel = document.getElementById('user-info-panel');
+          if (userInfoPanel) {
+            try {
+              // Try to determine auth state using multiple methods
+              let isAuth = false;
+              let user = null;
+              
+              if (window.chessAuthModule && window.chessAuthModule.isAuthenticatedSync) {
+                isAuth = window.chessAuthModule.isAuthenticatedSync();
+                user = window.chessAuthModule.getCurrentUser();
+              } else {
+                // Fallback to checking storage
+                try {
+                  const authStr = localStorage.getItem('chess_assistant_auth');
+                  if (authStr) {
+                    const authData = JSON.parse(authStr);
+                    isAuth = !!authData && !!authData.token;
+                    user = authData.user;
+                  }
+                } catch (e) {
+                  console.error("Error checking localStorage:", e);
+                }
+              }
+              
+              // Update the user info section
+              if (window.chessAnalyzerExtension && window.chessAnalyzerExtension.updateUserInfoSection) {
+                window.chessAnalyzerExtension.updateUserInfoSection(isAuth, user);
+              } else {
+                console.warn("updateUserInfoSection not found, using fallback");
+                userInfoPanel.innerHTML = isAuth 
+                  ? `<div>Logged in as ${user?.email || 'User'}</div>`
+                  : `<div>Please log in to use AI analysis</div>`;
+              }
+            } catch (panelError) {
+              console.error("Error updating user panel:", panelError);
+              userInfoPanel.innerHTML = `<div>Error checking login status</div>`;
+            }
+          }
+          
+          sendResponse({ success: true });
+        } else {
+          console.error("Sidebar element not found after initialization");
+          sendResponse({ success: false, error: "Sidebar element not found" });
+        }
+      } catch (error) {
+        console.error("Error showing sidebar:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    };
+    
+    // Execute the async function and return true to indicate async response
+    handleShowSidebar();
     return true;
   }
   
@@ -1507,4 +1032,578 @@ window.addEventListener('chess_auth_changed', (event) => {
   
   // Update ask button state
   updateAskButtonState();
+});
+
+// Make auth initialization more resilient with immediate fallbacks
+async function initializeAuth(maxRetries = 2) {
+  try {
+    console.log("Starting auth initialization");
+    // Try a simple ping to check background connection first
+    try {
+      await pingBackgroundScript();
+      console.log("Background connection confirmed");
+    } catch (pingError) {
+      console.warn("Background connection issue, continuing anyway:", pingError);
+    }
+    
+    // Load the auth module with minimal waiting
+    const module = await loadAuthModule();
+    console.log("Auth module loaded");
+    
+    // Assign reference and functions
+    authModule = module;
+    
+    // Force isInitialized to true
+    if (module) {
+      module.isInitialized = true;
+      assignAuthFunctions(module);
+      console.log("Auth functions assigned");
+      return module;
+    }
+    
+    throw new Error("Auth module not available");
+  } catch (error) {
+    console.error("Auth init error, using fallback:", error);
+    // Create a fallback auth module
+    const fallbackModule = window.chessAuthModule || {
+      isInitialized: true,
+      isAuthenticated: async () => false,
+      isAuthenticatedSync: () => false,
+      getCurrentUser: () => null,
+      getAuthToken: () => null,
+      clearAuth: () => {}
+    };
+    
+    // Set the fallback
+    authModule = fallbackModule;
+    window.chessAuthModule = fallbackModule;
+    assignAuthFunctions(fallbackModule);
+    
+    // Return the fallback
+    return fallbackModule;
+  }
+}
+
+// Add this new function to update UI based on auth state
+function updateUIBasedOnAuth() {
+  const isAuthenticated = window.chessAuthModule.isAuthenticated();
+  const user = window.chessAuthModule.getCurrentUser();
+  console.log("Updating UI with auth state:", { isAuthenticated, user });
+  
+  const userInfoPanel = document.getElementById('user-info-panel');
+  if (userInfoPanel) {
+    updateUserPanel(userInfoPanel);
+  }
+  
+  // Update ask button state
+  updateAskButtonState();
+}
+
+// Initialize auth when content script loads
+document.addEventListener('DOMContentLoaded', initializeAuth);
+
+// Add function to handle question submissions
+async function handleQuestionSubmit(inputElement, responseArea) {
+  const question = inputElement.value.trim();
+  if (!question) return;
+  
+  // Check auth state
+  if (!window.chessAuthModule.isAuthenticatedSync()) {
+    responseArea.innerHTML = '<p class="error">Please login to ask questions.</p>';
+    return;
+  }
+  
+  // Show loading state
+  responseArea.innerHTML = '<p class="loading">Analyzing position...</p>';
+  
+  try {
+    // Get current position data
+    const positionData = await captureCurrentPosition();
+    
+    // Call API with question and position data
+    const response = await fetch(`${window.API_URL}/analysis`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await getAuthToken()}`
+      },
+      body: JSON.stringify({
+        message: question,
+        fen: positionData.fen || '',
+        pgn: positionData.pgn || '',
+        image_data: positionData.imageData || ''
+      })
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        responseArea.innerHTML = '<p class="error">Authentication required. Please login again.</p>';
+      } else if (response.status === 402) {
+        responseArea.innerHTML = '<p class="error">You need more credits to analyze positions.</p>';
+      } else {
+        responseArea.innerHTML = `<p class="error">Error: ${response.status} - ${response.statusText}</p>`;
+      }
+      return;
+    }
+    
+    const data = await response.json();
+    
+    // Display response
+    responseArea.innerHTML = `
+      <div class="question">
+        <strong>Q: ${question}</strong>
+      </div>
+      <div class="answer">
+        ${data.response || 'No analysis available.'}
+      </div>
+    `;
+    
+    // Clear input
+    inputElement.value = '';
+    
+  } catch (error) {
+    console.error("Error submitting question:", error);
+    responseArea.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+  }
+}
+
+// Check if we're on a chess site before initializing
+function isChessSite() {
+  const url = window.location.href;
+  return url.includes('chess.com') || url.includes('lichess.org');
+}
+
+// Only run on chess sites
+if (isChessSite()) {
+  // Initialize auth system
+  initializeAuth().catch(error => {
+    console.error("Error during auth initialization:", error);
+  });
+  
+  // Register message listener for sidebar - make sure it actually registers
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log("Content script received message:", request);
+    
+    // Add ping handler for extension health check
+    if (request.action === "ping") {
+      console.log("Ping received, responding immediately");
+      sendResponse({ success: true });
+      return true;
+    }
+    
+    // Only process sidebar requests on chess sites
+    if (request.action === "showSidebar") {
+      console.log("Show sidebar request received");
+      
+      // Create a promise to handle the async operations
+      const handleShowSidebar = async () => {
+        try {
+          console.log("Starting sidebar initialization");
+          
+          // Make sure auth is initialized first
+          await initializeAuth();
+          console.log("Auth initialized, continuing to sidebar init");
+          
+          // Initialize the sidebar if not already done
+          if (!sidebarInitialized) {
+            console.log("Sidebar not initialized, initializing now");
+            await initializeSidebar();
+            console.log("Sidebar initialized:", sidebarInitialized);
+          } else {
+            console.log("Sidebar already initialized");
+          }
+          
+          // Show the sidebar
+          sidebarVisible = true;
+          const sidebar = document.getElementById('chess-analysis-sidebar');
+          if (sidebar) {
+            console.log("Sidebar element found, displaying it");
+            sidebar.style.right = '0';
+            sidebar.style.display = 'flex';
+            sidebar.style.visibility = 'visible';
+            
+            // Make sure the toggle button is visible
+            ensureToggleButtonVisible();
+            
+            // Force style to be visible
+            sidebar.style.opacity = '1';
+            sidebar.style.zIndex = '9999';
+            
+            // Update user panel
+            const userInfoPanel = document.getElementById('user-info-panel');
+            if (userInfoPanel) {
+              if (window.chessAnalyzerExtension && window.chessAnalyzerExtension.updateUserInfoSection) {
+                window.chessAnalyzerExtension.updateUserInfoSection(
+                  window.chessAuthModule ? window.chessAuthModule.isAuthenticatedSync() : false, 
+                  window.chessAuthModule ? window.chessAuthModule.getCurrentUser() : null
+                );
+              } else {
+                console.error("updateUserInfoSection function not found");
+              }
+            }
+            
+            sendResponse({ success: true });
+          } else {
+            console.error("Sidebar element not found after initialization");
+            sendResponse({ success: false, error: "Sidebar element not found" });
+          }
+        } catch (error) {
+          console.error("Error showing sidebar:", error);
+          sendResponse({ success: false, error: error.message });
+        }
+      };
+      
+      // Execute the async function and return true
+      handleShowSidebar();
+      return true;
+    }
+    
+    // Handle other messages...
+    return false;
+  });
+} else {
+  console.log("Not on a supported chess site, content script idle");
+}
+
+// Clean up duplicate declarations and fix initialization 
+// Add this at the start of your content-script.js
+window.chessAnalyzerExtension = window.chessAnalyzerExtension || {};
+
+// Define the updateUserInfoSection function once
+window.chessAnalyzerExtension.updateUserInfoSection = function(authenticated, user) {
+  console.log("Updating user info section:", authenticated, user);
+  
+  const userInfoPanel = document.getElementById('user-info-panel');
+  if (!userInfoPanel) {
+    console.error("User info panel not found");
+    return;
+  }
+  
+  if (authenticated && user) {
+    userInfoPanel.innerHTML = `
+      <div class="user-logged-in" style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="user-details">
+          <span class="user-name" style="font-weight: 500; font-size: 14px; margin-bottom: 4px; display: block;">
+            ${user.full_name || user.email || 'User'}
+          </span>
+          <div class="credits-display" style="display: flex; align-items: center; gap: 4px;">
+            <span class="credits-count" style="color: #34a853; font-weight: 600; font-size: 15px;">
+              ${user.credits || 0}
+            </span>
+            <span class="credits-label" style="color: #666; font-size: 13px;">credits</span>
+          </div>
+        </div>
+        <button id="sidebar-logout-btn" style="background: none; border: none; color: #4285f4; cursor: pointer;">
+          Logout
+        </button>
+      </div>
+    `;
+    
+    // Add logout button listener
+    setTimeout(() => {
+      const logoutBtn = document.getElementById('sidebar-logout-btn');
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+          try {
+            chrome.runtime.sendMessage({ action: "logout" }, response => {
+              if (chrome.runtime.lastError) {
+                console.error("Logout error:", chrome.runtime.lastError);
+                return;
+              }
+              
+              // Update UI after logout
+              window.chessAnalyzerExtension.updateUserInfoSection(false, null);
+            });
+          } catch (e) {
+            console.error("Error sending logout message:", e);
+          }
+        });
+      }
+    }, 0);
+  } else {
+    userInfoPanel.innerHTML = `
+      <div class="user-logged-out" style="text-align: center;">
+        <p style="margin-bottom: 10px;">Login to use AI chess analysis</p>
+        <button id="sidebar-login-btn" style="background-color: #4285f4; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">
+          Login with Google
+        </button>
+      </div>
+    `;
+    
+    // Add login button listener
+    setTimeout(() => {
+      const loginBtn = document.getElementById('sidebar-login-btn');
+      if (loginBtn) {
+        loginBtn.addEventListener('click', () => {
+          loginBtn.textContent = "Logging in...";
+          loginBtn.disabled = true;
+          
+          try {
+            chrome.runtime.sendMessage({ action: "login" }, response => {
+              if (chrome.runtime.lastError) {
+                console.error("Login error:", chrome.runtime.lastError);
+                loginBtn.textContent = "Login with Google";
+                loginBtn.disabled = false;
+                return;
+              }
+              
+              console.log("Login initiated by background script");
+              // The background script will handle the rest
+            });
+          } catch (e) {
+            console.error("Error sending login message:", e);
+            loginBtn.textContent = "Login with Google";
+            loginBtn.disabled = false;
+          }
+        });
+      }
+    }, 0);
+  }
+};
+
+// Add a safe messaging function to handle connection errors
+function safelySendMessage(message, maxRetries = 3) {
+  return new Promise((resolve, reject) => {
+    let retries = 0;
+    
+    function attemptSend() {
+      try {
+        chrome.runtime.sendMessage(message, response => {
+          if (chrome.runtime.lastError) {
+            console.warn(`Message error (attempt ${retries + 1}/${maxRetries}):`, chrome.runtime.lastError);
+            
+            if (retries < maxRetries) {
+              retries++;
+              // Exponential backoff
+              setTimeout(attemptSend, 300 * Math.pow(2, retries));
+            } else {
+              reject(new Error(`Failed to send message after ${maxRetries} attempts: ${chrome.runtime.lastError.message || 'Connection failed'}`));
+            }
+          } else {
+            resolve(response);
+          }
+        });
+      } catch (error) {
+        if (retries < maxRetries) {
+          retries++;
+          setTimeout(attemptSend, 300 * Math.pow(2, retries));
+        } else {
+          reject(error);
+        }
+      }
+    }
+    
+    attemptSend();
+  });
+}
+
+// Replace direct chrome.runtime.sendMessage calls with safelySendMessage
+// For example:
+// Instead of:
+// chrome.runtime.sendMessage({ action: "login" }, response => {...});
+// Use:
+// safelySendMessage({ action: "login" }).then(response => {...}).catch(error => {...});
+
+// Function to ask a question about the position
+function askQuestion() {
+  const questionInput = document.getElementById('question-input');
+  const responseArea = document.getElementById('response-area');
+  const aiVisionToggle = document.getElementById('ai-vision-toggle');
+  
+  if (!questionInput || !responseArea) {
+    console.error("Question input or response area not found");
+    return;
+  }
+  
+  const question = questionInput.value.trim();
+  
+  if (!question) {
+    responseArea.textContent = "Please enter a question about the position.";
+    return;
+  }
+  
+  // Show loading indicator
+  responseArea.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: center; height: 100px;">
+      <div style="display: inline-block; border-radius: 50%; border: 3px solid #4285f4; 
+           border-top-color: transparent; width: 24px; height: 24px; animation: spin 1s linear infinite;"></div>
+      <div style="margin-left: 15px; font-weight: 500;">Analyzing position...</div>
+    </div>
+    <style>
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  `;
+  
+  // Check if we have a captured board
+  safelyGetStorage(['capturedBoard']).then(result => {
+    const capturedBoard = result.capturedBoard;
+    
+    if (!capturedBoard) {
+      responseArea.textContent = "Please capture a chess position first.";
+      return;
+    }
+    
+    // Determine if we should use vision
+    const useVision = aiVisionToggle && aiVisionToggle.checked;
+    
+    try {
+      // Get auth token
+      const auth = getAuthToken();
+      console.log("Using auth token:", auth ? "Present" : "Not available");
+      
+      // Send request to background script to handle API call
+      safelySendMessage({
+        action: "analyzeChessPosition",
+        question: question,
+        capturedBoard: capturedBoard,
+        useVision: useVision,
+        authToken: auth
+      }).then(response => {
+        console.log("Analysis response:", response);
+        
+        if (response && response.success) {
+          // Check if user info was returned (to update credit count)
+          if (response.user) {
+            console.log("Updating user data with:", response.user);
+            
+            // Update user data
+            if (authModule && authModule.updateUserData) {
+              authModule.updateUserData(response.user);
+            } else {
+              // Fallback: update directly in auth state
+              const authData = window.chessAuthModule && window.chessAuthModule.getAuthData();
+              if (authData) {
+                authData.user = response.user;
+                localStorage.setItem('chess_assistant_auth', JSON.stringify(authData));
+              }
+            }
+            
+            // Update UI
+            const userInfoPanel = document.getElementById('user-info-panel');
+            if (userInfoPanel) {
+              updateUserPanel(userInfoPanel);
+            }
+          }
+          
+          // Format the response with better styling
+          const formattedResponse = formatAPIResponse(response.data);
+          responseArea.innerHTML = formattedResponse;
+        } else {
+          // Handle specific error cases
+          const errorMsg = response?.error || "Unknown error";
+          
+          if (errorMsg.includes("Authentication required")) {
+            // Authentication error
+            responseArea.innerHTML = `
+              <div style="padding: 15px; text-align: center;">
+                <div style="font-weight: 600; font-size: 16px; margin-bottom: 10px;">Authentication Required</div>
+                <p>Your session has expired. Please login again to continue.</p>
+                <button id="relogin-btn" style="
+                  padding: 8px 16px;
+                  background-color: #4285f4;
+                  color: white;
+                  border: none;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  font-size: 14px;
+                  font-weight: 500;
+                  margin-top: 10px;
+                ">Login Again</button>
+              </div>
+            `;
+            
+            setTimeout(() => {
+              const reloginBtn = document.getElementById('relogin-btn');
+              if (reloginBtn) {
+                reloginBtn.addEventListener('click', handleLogin);
+              }
+            }, 0);
+          } else if (errorMsg.includes("Insufficient credits")) {
+            // Insufficient credits
+            showInsufficientCreditsWarning();
+          } else {
+            // General error
+            responseArea.innerHTML = `
+              <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+                <strong>Error:</strong> ${errorMsg}
+              </div>
+            `;
+          }
+        }
+      }).catch(error => {
+        console.error("Error in ask question flow:", error);
+        responseArea.innerHTML = `
+          <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+            <strong>Error:</strong> ${error.message}
+          </div>
+        `;
+      });
+    } catch (error) {
+      console.error("Error in ask question flow:", error);
+      responseArea.innerHTML = `
+        <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+          <strong>Error:</strong> ${error.message}
+        </div>
+      `;
+    }
+  }).catch(error => {
+    console.error("Error accessing storage:", error);
+    responseArea.innerHTML = `
+      <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
+        <strong>Error:</strong> Could not access storage: ${error.message}
+      </div>
+    `;
+  });
+}
+
+// Function to format API responses with better styling
+function formatAPIResponse(response) {
+  if (!response) return "No response from the server";
+  
+  // Replace newlines with HTML line breaks
+  let formatted = response.replace(/\n/g, '<br>');
+  
+  // Bold key terms
+  formatted = formatted.replace(/(best move|advantage|winning|check|mate|fork|pin|skewer|discovered attack|zwischenzug|tempo|initiative|development|center control|king safety|pawn structure)/gi, 
+    '<strong>$1</strong>');
+  
+  // Highlight chess moves (like e4, Nf3, etc.)
+  formatted = formatted.replace(/\b([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[\+#]?)\b/g, 
+    '<span style="color: #1a73e8; font-weight: 500;">$1</span>');
+  
+  // Highlight evaluations (+1.5, -0.7, etc.)
+  formatted = formatted.replace(/(\+|-)\d+\.?\d*/g, 
+    '<span style="color: #188038; font-weight: 500;">$1</span>');
+  
+  return formatted;
+}
+
+// Add diagnostic function to check if background script is alive
+function pingBackgroundScript() {
+  console.log("Pinging background script...");
+  return safelySendMessage({ action: "ping" })
+    .then(response => {
+      console.log("Background script responded:", response);
+      return response;
+    })
+    .catch(error => {
+      console.error("Background script ping failed:", error);
+      throw error;
+    });
+}
+
+// Call this on initialization to check connection
+document.addEventListener('DOMContentLoaded', () => {
+  // Ping the background script to make sure it's alive
+  pingBackgroundScript()
+    .then(() => {
+      console.log("Background script connection verified");
+    })
+    .catch(error => {
+      console.error("Background connection issue:", error);
+      // Show error message to user if needed
+    });
 });

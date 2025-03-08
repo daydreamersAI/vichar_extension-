@@ -1,15 +1,26 @@
 // auth-storage.js - Updated to work without ES modules
 
-// Create a module object that will be accessible globally
-window.chessAuthModule = {};
+// Add this at the top of your auth-storage.js
+console.log("Auth storage module loading...");
 
-// Configuration
-const API_URL = 'https://api.beekayprecision.com';
+// Create a module object that will be accessible globally
+window.chessAuthModule = window.chessAuthModule || {};
+
+// Set initialization flag immediately at the top
+window.chessAuthModule.isInitialized = true;
+
+// Configuration - use window.API_URL if it exists, otherwise set it
+window.API_URL = window.API_URL || 'https://api.beekayprecision.com';
+
+// Add a cache for auth data to avoid repeated storage access
+window.chessAuthModule._cachedAuthData = null;
+
+console.log("Auth module set as initialized at load time");
 
 // Check if user is authenticated
-window.chessAuthModule.isAuthenticated = function() {
+window.chessAuthModule.isAuthenticated = async function() {
   try {
-    const authData = window.chessAuthModule.getAuthData();
+    const authData = await window.chessAuthModule.getAuthData();
     return !!authData && !!authData.token;
   } catch (error) {
     console.error('Error checking authentication:', error);
@@ -17,11 +28,56 @@ window.chessAuthModule.isAuthenticated = function() {
   }
 }
 
+// Add a synchronous version for quick checks
+window.chessAuthModule.isAuthenticatedSync = function() {
+  try {
+    // Check cache first
+    if (window.chessAuthModule._cachedAuthData) {
+      return !!window.chessAuthModule._cachedAuthData.token;
+    }
+    
+    // Fallback to localStorage
+    try {
+      const authDataStr = localStorage.getItem('chess_assistant_auth');
+      if (authDataStr) {
+        const authData = JSON.parse(authDataStr);
+        // Update cache
+        window.chessAuthModule._cachedAuthData = authData;
+        return !!authData && !!authData.token;
+      }
+    } catch (e) {
+      console.error("Error reading from localStorage:", e);
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error in sync auth check:', error);
+    return false;
+  }
+}
+
 // Get the current user data
 window.chessAuthModule.getCurrentUser = function() {
   try {
-    const authData = window.chessAuthModule.getAuthData();
-    return authData && authData.user ? authData.user : null;
+    // Check cache first
+    if (window.chessAuthModule._cachedAuthData && window.chessAuthModule._cachedAuthData.user) {
+      return window.chessAuthModule._cachedAuthData.user;
+    }
+    
+    // Fallback to localStorage
+    try {
+      const authDataStr = localStorage.getItem('chess_assistant_auth');
+      if (authDataStr) {
+        const authData = JSON.parse(authDataStr);
+        // Update cache
+        window.chessAuthModule._cachedAuthData = authData;
+        return authData && authData.user ? authData.user : null;
+      }
+    } catch (e) {
+      console.error("Error reading from localStorage:", e);
+    }
+    
+    return null;
   } catch (error) {
     console.error('Error getting current user:', error);
     return null;
@@ -42,14 +98,41 @@ window.chessAuthModule.getAuthToken = function() {
 // Get the complete auth data
 window.chessAuthModule.getAuthData = function() {
   try {
-    // Try the primary key first
+    // Check if chrome.storage is available
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      // First try chrome.storage.local
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['authToken', 'userData'], (result) => {
+          if (result.authToken) {
+            resolve({
+              isAuthenticated: true,
+              token: result.authToken,
+              user: result.userData
+            });
+            return;
+          }
+          
+          // If not in chrome.storage, try localStorage
+          tryLocalStorage(resolve);
+        });
+      });
+    } else {
+      // Chrome storage not available, use localStorage only
+      return new Promise((resolve) => {
+        tryLocalStorage(resolve);
+      });
+    }
+  } catch (error) {
+    console.error('Error getting auth data:', error);
+    return Promise.resolve(null);
+  }
+  
+  // Helper function to try localStorage
+  function tryLocalStorage(resolve) {
     let authDataStr = localStorage.getItem('chess_assistant_auth');
-    
-    // If not found, try the alternate key that might be set by the server
     if (!authDataStr) {
       const tokenDataStr = localStorage.getItem('chess_assistant_token');
       if (tokenDataStr) {
-        // Convert the token data format to the auth data format
         try {
           const parsedToken = JSON.parse(tokenDataStr);
           const authData = {
@@ -57,45 +140,65 @@ window.chessAuthModule.getAuthData = function() {
             token: parsedToken.access_token,
             user: parsedToken.user
           };
-          // Also store it in the correct format for future use
-          localStorage.setItem('chess_assistant_auth', JSON.stringify(authData));
-          console.log('Converted token data to auth data format');
-          return authData;
-        } catch (parseError) {
-          console.error('Error parsing token data:', parseError);
-          return null;
+          resolve(authData);
+          return;
+        } catch (e) {
+          console.error('Error parsing token data:', e);
         }
       }
-      return null;
+      resolve(null);
+      return;
     }
     
-    return JSON.parse(authDataStr);
-  } catch (error) {
-    console.error('Error getting auth data:', error);
-    return null;
+    try {
+      resolve(JSON.parse(authDataStr));
+    } catch (e) {
+      console.error('Error parsing auth data:', e);
+      resolve(null);
+    }
   }
 }
 
 // Set the auth data
 window.chessAuthModule.setAuthData = function(data) {
   try {
+    // Update cache
+    window.chessAuthModule._cachedAuthData = data;
+    
     if (!data) {
+      // Clear auth data
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.remove(['authToken', 'userData']);
+      }
       localStorage.removeItem('chess_assistant_auth');
       localStorage.removeItem('chess_assistant_token');
+      localStorage.removeItem('chess_assistant_auth_updated');
     } else {
+      // Store in chrome.storage.local if available
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          'authToken': data.token,
+          'userData': data.user
+        });
+      }
+      
+      // Store in localStorage
       localStorage.setItem('chess_assistant_auth', JSON.stringify(data));
       
-      // Also update the alternate format for consistency
+      // Store token data in alternate format
       const tokenData = {
         access_token: data.token,
         token_type: "bearer",
         user: data.user
       };
       localStorage.setItem('chess_assistant_token', JSON.stringify(tokenData));
+      
+      // Set timestamp for sync
+      localStorage.setItem('chess_assistant_auth_updated', Date.now().toString());
     }
     
-    // Also notify the background script about the change
-    if (chrome && chrome.runtime) {
+    // Notify background script
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
       try {
         chrome.runtime.sendMessage({
           action: 'auth_updated',
@@ -105,6 +208,12 @@ window.chessAuthModule.setAuthData = function(data) {
         console.error('Error sending auth update message:', error);
       }
     }
+    
+    // Dispatch event for local listeners
+    const authEvent = new CustomEvent('chess_auth_changed', {
+      detail: data
+    });
+    window.dispatchEvent(authEvent);
     
     return true;
   } catch (error) {
@@ -132,107 +241,77 @@ window.chessAuthModule.updateUserData = function(userData) {
 // Clear all auth data (logout)
 window.chessAuthModule.clearAuth = function() {
   try {
+    // Clear cache
+    window.chessAuthModule._cachedAuthData = null;
+    
+    // Clear localStorage
     localStorage.removeItem('chess_assistant_auth');
     localStorage.removeItem('chess_assistant_token');
     
-    // Also clear any other related items
-    localStorage.removeItem('chess_assistant_auth_updated');
-    
-    // Notify the background script about logout
-    if (chrome && chrome.runtime) {
-      try {
-        chrome.runtime.sendMessage({
-          action: 'auth_updated',
-          data: null
-        });
-      } catch (error) {
-        console.error('Error sending logout message:', error);
-      }
+    // Notify background script
+    try {
+      chrome.runtime.sendMessage({
+        action: 'logout'
+      });
+    } catch (e) {
+      console.error("Error notifying background of logout:", e);
     }
     
     return true;
   } catch (error) {
-    console.error('Error clearing auth data:', error);
+    console.error('Error clearing auth:', error);
     return false;
   }
 }
 
-// Login with Google (simple version that checks localStorage for token)
+// Simplified login with Google that delegates to background script
 window.chessAuthModule.loginWithGoogle = function() {
-  console.log('Checking for auth data from Google login...');
+  console.log('Delegating login to background script');
   
-  // First check if we already have auth data in localStorage
-  // This is set by the callback page after successful Google login
-  const authData = window.chessAuthModule.getAuthData();
-  
-  if (authData && authData.token) {
-    console.log('Found existing auth data from callback');
-    // Validate the token with the server
-    return window.chessAuthModule.validateToken(authData.token)
-      .then(isValid => {
-        if (isValid) {
-          console.log('Existing token is valid');
-          return authData;
-        } else {
-          console.log('Existing token is invalid, clearing');
-          window.chessAuthModule.clearAuth();
-          throw new Error('Invalid token');
-        }
-      })
-      .catch(error => {
-        console.error('Error validating token:', error);
-        // Continue with new login attempt
-        throw error;
-      });
-  }
-  
-  // If we don't have valid auth data, we need to start the login process
-  // Direct the user to the login URL
   return new Promise((resolve, reject) => {
-    fetch(`${API_URL}/auth/login/google`)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        if (!data.url) {
-          throw new Error('No authentication URL found in the response');
+    try {
+      chrome.runtime.sendMessage({ action: "login" }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error("Connection to background script failed. Please try again."));
+          return;
         }
         
-        // Open the URL in a new tab
-        chrome.tabs.create({ url: data.url });
-        
-        // Set up a localStorage event listener to detect when auth is completed
-        const storageListener = (event) => {
-          if (event.key === 'chess_assistant_auth' || event.key === 'chess_assistant_token') {
-            // Auth data has changed - check if we have a valid token now
-            const newAuthData = window.chessAuthModule.getAuthData();
-            if (newAuthData && newAuthData.token) {
-              window.removeEventListener('storage', storageListener);
-              clearTimeout(timeout);
-              resolve(newAuthData);
-            }
-          }
-        };
-        
-        window.addEventListener('storage', storageListener);
-        
-        // Set a timeout to avoid hanging indefinitely
-        const timeout = setTimeout(() => {
-          window.removeEventListener('storage', storageListener);
-          reject(new Error('Login timed out. Please try again.'));
-        }, 120000); // 2 minute timeout
-      })
-      .catch(error => {
-        console.error('Login error:', error);
-        reject(error);
+        console.log("Login initiated by background script");
+        resolve({ message: "Login window opened" });
       });
+    } catch (error) {
+      reject(new Error("Failed to initiate login. Please refresh the page and try again."));
+    }
   });
 }
 
-// Fetch user data from the server
+// Modify the validateToken function to use the background script
+window.chessAuthModule.validateToken = function(token) {
+  if (!token) return Promise.resolve(false);
+  
+  // Instead of direct fetch, use chrome.runtime.sendMessage
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({
+        action: "validateToken",
+        token: token
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error("Token validation error via background:", chrome.runtime.lastError);
+          resolve(false);
+          return;
+        }
+        
+        resolve(response && response.isValid);
+      });
+    } catch (error) {
+      console.error("Error sending validation message:", error);
+      resolve(false);
+    }
+  });
+}
+
+// Similarly modify fetchUserData to use background script
 window.chessAuthModule.fetchUserData = function(token) {
   if (!token) {
     token = window.chessAuthModule.getAuthToken();
@@ -241,41 +320,34 @@ window.chessAuthModule.fetchUserData = function(token) {
     }
   }
   
-  return fetch(`${API_URL}/auth/me`, {
-    headers: {
-      'Authorization': `Bearer ${token}`
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({
+        action: "fetchUserData",
+        token: token
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error("Error fetching user data: " + chrome.runtime.lastError.message));
+          return;
+        }
+        
+        if (response && response.success && response.userData) {
+          // Update the stored user data
+          window.chessAuthModule.getAuthData().then(authData => {
+            if (authData) {
+              authData.user = response.userData;
+              window.chessAuthModule.setAuthData(authData);
+            }
+          });
+          
+          resolve(response.userData);
+        } else {
+          reject(new Error(response?.error || "Unknown error fetching user data"));
+        }
+      });
+    } catch (error) {
+      reject(error);
     }
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`Failed to fetch user data: ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(userData => {
-    // Update the stored user data
-    const authData = window.chessAuthModule.getAuthData();
-    if (authData) {
-      authData.user = userData;
-      window.chessAuthModule.setAuthData(authData);
-    }
-    return userData;
-  });
-}
-
-// Validate token with the server
-window.chessAuthModule.validateToken = function(token) {
-  if (!token) return Promise.resolve(false);
-  
-  return fetch(`${API_URL}/auth/me`, {
-    headers: {
-      'Authorization': `Bearer ${token}`
-    }
-  })
-  .then(response => response.ok)
-  .catch(error => {
-    console.error('Token validation error:', error);
-    return false;
   });
 }
 
@@ -311,23 +383,33 @@ window.chessAuthModule.validateStoredAuth = function() {
   return Promise.resolve(false);
 }
 
-// Get available credit packages
+// Do the same for other API calls
 window.chessAuthModule.getCreditPackages = function() {
   const token = window.chessAuthModule.getAuthToken();
   if (!token) {
     return Promise.reject(new Error('No auth token available'));
   }
   
-  return fetch(`${API_URL}/payments/credits/packages`, {
-    headers: {
-      'Authorization': `Bearer ${token}`
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({
+        action: "getCreditPackages",
+        token: token
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error("Error fetching packages: " + chrome.runtime.lastError.message));
+          return;
+        }
+        
+        if (response && response.success) {
+          resolve(response.packages);
+        } else {
+          reject(new Error(response?.error || "Unknown error fetching packages"));
+        }
+      });
+    } catch (error) {
+      reject(error);
     }
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`Failed to fetch credit packages: ${response.status}`);
-    }
-    return response.json();
   });
 }
 
@@ -339,7 +421,7 @@ window.chessAuthModule.openPaymentPage = function(packageId) {
   }
   
   // Open the payment page in a new tab
-  const paymentUrl = `${API_URL}/payments/payment-page?package_id=${packageId}`;
+  const paymentUrl = `${window.API_URL}/payments/payment-page?package_id=${packageId}`;
   chrome.tabs.create({ url: paymentUrl });
   
   // Set up listener for payment completion
@@ -366,35 +448,6 @@ window.chessAuthModule.openPaymentPage = function(packageId) {
   });
 }
 
-// Initialize when the script loads
-console.log('Auth storage module initialized');
-
-// Check for auth data in localStorage
-const authData = window.chessAuthModule.getAuthData();
-if (authData && authData.token) {
-  console.log('Found existing auth data on init');
-  
-  // Validate token
-  window.chessAuthModule.validateToken(authData.token)
-    .then(isValid => {
-      if (!isValid) {
-        console.log('Token invalid on init, clearing auth');
-        window.chessAuthModule.clearAuth();
-      } else {
-        console.log('Token valid on init');
-        
-        // Refresh user data
-        window.chessAuthModule.fetchUserData(authData.token)
-          .catch(error => {
-            console.error('Error refreshing user data on init:', error);
-          });
-      }
-    })
-    .catch(error => {
-      console.error('Error validating token on init:', error);
-    });
-}
-
 // Listen for storage changes to detect auth updates from callback page
 window.addEventListener('storage', event => {
   if (event.key === 'chess_assistant_auth' || event.key === 'chess_assistant_token') {
@@ -414,3 +467,22 @@ window.addEventListener('storage', event => {
     window.dispatchEvent(authEvent);
   }
 });
+
+// Add periodic validation check
+window.chessAuthModule.startAuthValidation = function() {
+  // Check auth every 5 minutes
+  setInterval(() => {
+    if (window.chessAuthModule.isAuthenticated()) {
+      window.chessAuthModule.validateStoredAuth()
+        .then(isValid => {
+          if (!isValid) {
+            // Clear auth if invalid
+            window.chessAuthModule.clearAuth();
+          }
+        })
+        .catch(error => {
+          console.error('Auth validation error:', error);
+        });
+    }
+  }, 5 * 60 * 1000);
+}

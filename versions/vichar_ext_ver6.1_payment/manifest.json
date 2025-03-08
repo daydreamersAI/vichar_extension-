@@ -12,10 +12,10 @@
   "webNavigation"
   ],
   "host_permissions": [
-    "https://*.lichess.org/*",
-    "https://*.chess.com/*",
+    "https://*.google.com/*",
     "https://api.beekayprecision.com/*",
-    "https://www.googleapis.com/*"
+    "https://*.chess.com/*",
+    "https://*.lichess.org/*"
   ],
   "action": {
     "default_popup": "src/popup/popup.html",
