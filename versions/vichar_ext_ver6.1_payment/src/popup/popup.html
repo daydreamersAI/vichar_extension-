@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Chess Position Analyzer</title>
+  <style>
+    body {
+      width: 320px;
+      padding: 16px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #333;
+      margin: 0;
+    }
+    
+    h2 {
+      color: #333;
+      margin-top: 0;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+    
+    p {
+      margin-top: 0;
+      margin-bottom: 16px;
+      color: #555;
+      font-size: 14px;
+    }
+    
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    
+    button {
+      width: 100%;
+      padding: 10px;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+    
+    button:hover:not(:disabled) {
+      background-color: #3367d6;
+    }
+    
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+    
+    .status {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 14px;
+      display: none;
+    }
+    
+    .info {
+      background-color: #e3f2fd;
+      color: #0d47a1;
+    }
+    
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    
+    /* User info styling */
+    .user-info {
+      background-color: #f5f5f5;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .user-logged-in {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .user-logged-out {
+      text-align: center;
+    }
+    
+    .user-logged-out p {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    
+    .user-details {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .user-name {
+      font-weight: 500;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    
+    .credits-display {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    .credits-count {
+      color: #34a853;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    
+    .credits-label {
+      color: #666;
+      font-size: 13px;
+    }
+    
+    .login-button {
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .login-button:hover {
+      background-color: #3367d6;
+    }
+    
+    .text-button {
+      background: none;
+      border: none;
+      color: #4285f4;
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: color 0.2s;
+      width: auto;
+    }
+    
+    .text-button:hover {
+      color: #3367d6;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h2>Chess Position Analyzer</h2>
+  <p>Analyze your chess positions with AI</p>
+  
+  <!-- User info section will be inserted here by JS -->
+  
+  <div class="button-group">
+    <button id="sidebarBtn">Open Analysis Sidebar</button>
+    <button id="captureBtn">Capture & Open in New Tab</button>
+  </div>
+  
+  <div id="status" class="status" style="display: none;"></div>
+  
+  <script type="module" src="popup.js"></script>
+
+  
+</body>
+</html>
