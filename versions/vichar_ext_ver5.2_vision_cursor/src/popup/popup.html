@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Chess Position Analyzer</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+    }
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background-color: #3367d6;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .info {
+      background-color: #e3f2fd;
+      color: #0d47a1;
+    }
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    .form-group {
+      margin-bottom: 10px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    .auth-container {
+      margin-bottom: 15px;
+    }
+    .auth-toggle {
+      text-align: center;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    .auth-toggle a {
+      color: #4285f4;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .auth-toggle a:hover {
+      text-decoration: underline;
+    }
+    .user-info {
+      margin-bottom: 15px;
+      padding: 10px;
+      background-color: #e3f2fd;
+      border-radius: 4px;
+    }
+    .hidden {
+      display: none;
+    }
+    .login-required {
+      text-align: center;
+      margin: 10px 0;
+      font-style: italic;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h2>Chess Position Analyzer</h2>
+  
+  <!-- User info section (shown when logged in) -->
+  <div id="userInfo" class="user-info hidden">
+    <p>Welcome, <span id="userName"></span>!</p>
+    <button id="logoutBtn">Logout</button>
+  </div>
+  
+  <!-- Authentication container (shown when logged out) -->
+  <div id="authContainer" class="auth-container">
+    <p class="login-required">Please log in to use the extension</p>
+    
+    <!-- Login Form -->
+    <div id="loginForm">
+      <div class="form-group">
+        <label for="loginEmail">Email</label>
+        <input type="email" id="loginEmail" placeholder="Enter your email">
+      </div>
+      <div class="form-group">
+        <label for="loginPassword">Password</label>
+        <input type="password" id="loginPassword" placeholder="Enter your password">
+      </div>
+      <button id="loginBtn">Login</button>
+      <div class="auth-toggle">
+        <p>Don't have an account? <a id="showRegisterBtn">Register</a></p>
+      </div>
+    </div>
+    
+    <!-- Register Form (hidden by default) -->
+    <div id="registerForm" class="hidden">
+      <div class="form-group">
+        <label for="registerName">Name</label>
+        <input type="text" id="registerName" placeholder="Enter your name">
+      </div>
+      <div class="form-group">
+        <label for="registerEmail">Email</label>
+        <input type="email" id="registerEmail" placeholder="Enter your email">
+      </div>
+      <div class="form-group">
+        <label for="registerPassword">Password</label>
+        <input type="password" id="registerPassword" placeholder="Enter your password">
+      </div>
+      <button id="registerBtn">Register</button>
+      <div class="auth-toggle">
+        <p>Already have an account? <a id="showLoginBtn">Login</a></p>
+      </div>
+    </div>
+  </div>
+  
+  <p>Analyze your chess positions and get insights</p>
+  
+  <div class="button-group">
+    <button id="sidebarBtn" disabled>Open Analysis Sidebar</button>
+    <button id="captureBtn" disabled>Capture & Open in New Tab</button>
+  </div>
+  
+  <div id="status" class="status" style="display: none;"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
