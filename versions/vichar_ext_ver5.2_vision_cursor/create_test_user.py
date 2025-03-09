@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # MongoDB connection
-MONGODB_URI = os.getenv("MONGODB_URL", "mongodb+srv://user1:cartoon1@mongo-practice.slkil.mongodb.net/chess_assistant_db?retryWrites=true&w=majority&appName=Mongo-practice")
+MONGODB_URI = os.getenv("MONGODB_URL", "mongodb://localhost:27017/")
 
 try:
     # Connect to MongoDB
