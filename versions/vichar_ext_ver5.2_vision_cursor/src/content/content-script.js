@@ -99,19 +99,21 @@ function initializeSidebar() {
   questionContainer.style.cssText = `
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 10px;
+    gap: 10px;
+    padding: 15px;
     background-color: white;
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-bottom: 15px;
   `;
   
   const questionLabel = document.createElement('label');
   questionLabel.textContent = 'Ask about this position:';
   questionLabel.style.cssText = `
     font-weight: 600;
-    color: #333;
-    font-size: 14px;
+    color: #000;
+    font-size: 15px;
+    margin-bottom: 5px;
   `;
   
   const questionInput = document.createElement('textarea');
@@ -119,15 +121,17 @@ function initializeSidebar() {
   questionInput.placeholder = 'Example: What is the best move for white?';
   questionInput.style.cssText = `
     width: 100%;
-    height: 80px;
-    padding: 12px;
+    height: 120px;
+    padding: 15px;
     border: 1px solid #ddd;
     border-radius: 4px;
     resize: vertical;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    font-size: 14px;
-    line-height: 1.4;
-    color: #333;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #000;
+    background-color: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   `;
   
   // Add the AI vision toggle
@@ -162,16 +166,17 @@ function initializeSidebar() {
   const askButton = document.createElement('button');
   askButton.textContent = 'Ask Question';
   askButton.style.cssText = `
-    padding: 10px 16px;
+    padding: 12px 20px;
     background-color: #4285f4;
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 15px;
+    font-weight: 600;
     align-self: flex-start;
     transition: background-color 0.2s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   `;
   askButton.addEventListener('mouseenter', () => {
     askButton.style.backgroundColor = '#3367d6';
