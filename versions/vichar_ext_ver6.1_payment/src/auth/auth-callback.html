@@ -34,17 +34,45 @@
       margin-bottom: 20px;
       line-height: 1.5;
     }
+    #debug-info {
+      font-size: 12px;
+      color: #666;
+      margin-top: 20px;
+      text-align: left;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div id="status" class="success">Authentication Processing...</div>
     <div id="message" class="message">Please wait while we complete the authentication process.</div>
+    <div id="debug-info"></div>
   </div>
 
   <script>
+    // Add a debug logging function
+    const debugLog = [];
+    function logDebug(message) {
+      console.log(message);
+      debugLog.push(`${new Date().toISOString().substring(11, 19)}: ${message}`);
+      const debugElement = document.getElementById('debug-info');
+      if (debugElement) {
+        debugElement.textContent = debugLog.join('\n');
+      }
+    }
+
+    // Show debug info when needed
+    function showDebugInfo() {
+      const debugElement = document.getElementById('debug-info');
+      if (debugElement) {
+        debugElement.style.display = 'block';
+      }
+    }
+
     // Function to extract params from URL
     function getUrlParams() {
+      logDebug('Getting URL parameters');
       const params = {};
       const queryString = window.location.search.substring(1);
       const hashString = window.location.hash.substring(1);
@@ -67,35 +95,78 @@
         }
       }
       
+      logDebug(`Found ${Object.keys(params).length} URL parameters`);
       return params;
     }
 
     // Function to save auth data to localStorage to be accessible by the extension
     function saveAuthDataToLocalStorage(authData) {
       try {
-        // Save auth data in both formats for compatibility
-        localStorage.setItem('chess_assistant_auth', JSON.stringify({
+        logDebug('Saving auth data to localStorage');
+        
+        // Save in multiple redundant ways for maximum compatibility
+        
+        // 1. Main auth format
+        const authObject = {
           isAuthenticated: true,
           token: authData.token || authData.access_token,
           user: authData.user
-        }));
+        };
+        localStorage.setItem('chess_assistant_auth', JSON.stringify(authObject));
         
+        // 2. Token format
         localStorage.setItem('chess_assistant_token', JSON.stringify(authData));
+        
+        // 3. Individual fields for emergency fallback access
+        localStorage.setItem('chess_assistant_token_value', authData.token || authData.access_token);
+        if (authData.user) {
+          localStorage.setItem('chess_assistant_user', JSON.stringify(authData.user));
+        }
         
         // Set a timestamp to trigger storage event listeners
         localStorage.setItem('chess_assistant_auth_updated', Date.now().toString());
         
-        console.log('Auth data saved to localStorage');
+        logDebug('Auth data saved successfully to localStorage');
         return true;
       } catch (error) {
-        console.error('Error saving auth data:', error);
+        logDebug(`Error saving auth data: ${error.message}`);
+        showDebugInfo();
+        return false;
+      }
+    }
+
+    // Attempt to notify the extension about authentication
+    function notifyExtension(tokenData) {
+      try {
+        logDebug('Attempting to notify extension');
+        
+        if (chrome && chrome.runtime) {
+          logDebug('Chrome runtime API is available');
+          
+          chrome.runtime.sendMessage({
+            action: 'auth_updated',
+            data: {
+              token: tokenData.token || tokenData.access_token,
+              user: tokenData.user
+            }
+          }, response => {
+            logDebug(`Extension notification response: ${response ? JSON.stringify(response) : 'no response'}`);
+          });
+          
+          return true;
+        } else {
+          logDebug('Chrome runtime API not available');
+          return false;
+        }
+      } catch (msgError) {
+        logDebug(`Error communicating with extension: ${msgError.message}`);
         return false;
       }
     }
 
     // Main function to handle authentication callback
     async function handleAuthCallback() {
-      console.log('Auth callback handler running');
+      logDebug('Auth callback handler running');
       const statusElement = document.getElementById('status');
       const messageElement = document.getElementById('message');
       
@@ -106,7 +177,7 @@
         // Check if we have a tokenData variable defined in the page
         if (typeof window.tokenData !== 'undefined') {
           tokenData = window.tokenData;
-          console.log('Found tokenData in global variable');
+          logDebug('Found tokenData in global variable');
         }
         
         // Check for token in JSON embedded in the page
@@ -119,11 +190,11 @@
               eval(content);
               if (typeof window.tokenData !== 'undefined') {
                 tokenData = window.tokenData;
-                console.log('Found tokenData in script tag');
+                logDebug('Found tokenData in script tag');
                 break;
               }
             } catch (e) {
-              console.error('Error evaluating script tag:', e);
+              logDebug(`Error evaluating script tag: ${e.message}`);
             }
           }
         }
@@ -133,9 +204,9 @@
         if (tokenElement && !tokenData) {
           try {
             tokenData = JSON.parse(tokenElement.textContent);
-            console.log('Found token data in DOM element');
+            logDebug('Found token data in DOM element');
           } catch (e) {
-            console.error('Error parsing token element:', e);
+            logDebug(`Error parsing token element: ${e.message}`);
           }
         }
         
@@ -152,7 +223,7 @@
                 credits: parseInt(urlParams.credits || "0", 10)
               }
             };
-            console.log('Extracted token data from URL params');
+            logDebug('Extracted token data from URL params');
           }
         }
         
@@ -163,10 +234,10 @@
             const storedToken = localStorage.getItem('chess_assistant_token');
             if (storedToken) {
               tokenData = JSON.parse(storedToken);
-              console.log('Found token data in localStorage');
+              logDebug('Found token data in localStorage');
             }
           } catch (e) {
-            console.error('Error reading token from localStorage:', e);
+            logDebug(`Error reading token from localStorage: ${e.message}`);
           }
         }
         
@@ -174,7 +245,7 @@
           throw new Error('No authentication data found in the callback page');
         }
         
-        console.log('Token data found:', tokenData);
+        logDebug('Token data found and validated');
         
         // Save to localStorage for persistence
         const saved = saveAuthDataToLocalStorage(tokenData);
@@ -183,23 +254,16 @@
           throw new Error('Failed to save authentication data');
         }
         
+        // Create hidden element with token data for redundancy
+        const tokenDataElement = document.createElement('div');
+        tokenDataElement.id = 'token-data';
+        tokenDataElement.textContent = JSON.stringify(tokenData);
+        tokenDataElement.style.display = 'none';
+        document.body.appendChild(tokenDataElement);
+        
         // Notify the extension about the successful login
-        if (chrome && chrome.runtime) {
-          try {
-            chrome.runtime.sendMessage({
-              action: 'auth_updated',
-              data: {
-                token: tokenData.token || tokenData.access_token,
-                user: tokenData.user
-              }
-            }, response => {
-              console.log('Extension notification response:', response);
-            });
-          } catch (msgError) {
-            console.error('Error communicating with extension:', msgError);
-            // Continue anyway, since we've saved to localStorage
-          }
-        }
+        const notified = notifyExtension(tokenData);
+        logDebug(`Extension notification ${notified ? 'successful' : 'failed'}, proceeding anyway`);
         
         // Update the UI to show success
         statusElement.textContent = 'Authentication Successful!';
@@ -211,10 +275,15 @@
         
         // Auto-close the window after 3 seconds
         setTimeout(() => {
-          window.close();
+          try {
+            window.close();
+          } catch (e) {
+            logDebug(`Auto-close error: ${e.message}`);
+          }
         }, 3000);
       } catch (error) {
-        console.error('Authentication callback error:', error);
+        logDebug(`Authentication callback error: ${error.message}`);
+        showDebugInfo();
         
         // Update the UI to show error
         statusElement.textContent = 'Authentication Failed';

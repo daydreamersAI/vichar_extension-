@@ -14,163 +14,332 @@ window.API_URL = window.API_URL || "https://api.beekayprecision.com";
 // Auth module reference - declare only once
 let authModule = null;
 
-// Define placeholder auth functions until the module loads
+// Default placeholder functions
 let isAuthenticated = () => {
-  if (authModule) return authModule.isAuthenticated();
-  // Try localStorage as fallback
+  console.log("Using enhanced isAuthenticated function");
+  
+  // First check localStorage as a quick synchronous check
   try {
-    const authData = localStorage.getItem('chess_assistant_auth');
-    return authData && JSON.parse(authData).token;
-  } catch (e) {
-    return false;
+    const authStr = localStorage.getItem('chess_assistant_auth');
+    const localResult = !!authStr && !!JSON.parse(authStr).token;
+    console.log("Local auth check result:", localResult);
+    
+    // Then asynchronously check with background script and update UI if needed
+    chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+      if (chrome.runtime.lastError) {
+        console.error("Error getting auth state from background:", chrome.runtime.lastError);
+        return;
+      }
+      
+      console.log("Background auth check result:", response?.isAuthenticated);
+      
+      // If the auth state is different than what we thought, update the UI
+      if (response && response.isAuthenticated !== localResult) {
+        console.log("Auth state mismatch, updating UI");
+        // Update user panel if it exists
+        const userInfoPanel = document.getElementById('user-info-panel');
+        if (userInfoPanel) {
+          window.chessAnalyzerExtension.updateUserInfoSection(response.isAuthenticated, response.user);
+        }
+        
+        // Update ask button state
+        updateAskButtonState();
+      }
+    });
+    
+    return localResult;
+  } catch (e) { 
+    console.error("Error in enhanced isAuthenticated:", e);
+    return false; 
   }
 };
 
 let getCurrentUser = () => {
-  if (authModule) return authModule.getCurrentUser();
-  // Try localStorage as fallback
+  console.log("Using enhanced getCurrentUser function");
+  
+  // First check localStorage as a quick synchronous check
   try {
-    const authData = localStorage.getItem('chess_assistant_auth');
-    return authData ? JSON.parse(authData).user : null;
-  } catch (e) {
-    return null;
+    const authStr = localStorage.getItem('chess_assistant_auth');
+    const localUser = authStr ? JSON.parse(authStr).user : null;
+    
+    // Asynchronously check with background script
+    chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+      if (chrome.runtime.lastError) {
+        console.error("Error getting user data from background:", chrome.runtime.lastError);
+        return;
+      }
+      
+      // If we have user data and it's different from what we have locally
+      if (response && response.user) {
+        const backgroundUser = response.user;
+        
+        // Compare by checking if credits or email changed
+        const userChanged = !localUser || 
+                           localUser.email !== backgroundUser.email || 
+                           localUser.credits !== backgroundUser.credits;
+        
+        if (userChanged) {
+          console.log("User data from background differs from local, updating UI");
+          
+          // Update localStorage with latest user data
+          try {
+            const authStr = localStorage.getItem('chess_assistant_auth');
+            if (authStr) {
+              const authData = JSON.parse(authStr);
+              authData.user = backgroundUser;
+              localStorage.setItem('chess_assistant_auth', JSON.stringify(authData));
+            }
+          } catch (e) {
+            console.error("Error updating localStorage:", e);
+          }
+          
+          // Update UI elements
+          const userInfoPanel = document.getElementById('user-info-panel');
+          if (userInfoPanel) {
+            window.chessAnalyzerExtension.updateUserInfoSection(true, backgroundUser);
+          }
+          
+          // Update ask button state
+          updateAskButtonState();
+        }
+      }
+    });
+    
+    return localUser;
+  } catch (e) { 
+    console.error("Error in enhanced getCurrentUser:", e);
+    return null; 
   }
 };
 
 let getAuthToken = () => {
-  if (authModule) return authModule.getAuthToken();
-  // Try localStorage as fallback
+  console.log("Using fallback getAuthToken function");
   try {
-    const authData = localStorage.getItem('chess_assistant_auth');
-    return authData ? JSON.parse(authData).token : null;
-  } catch (e) {
-    return null;
+    const authStr = localStorage.getItem('chess_assistant_auth');
+    return authStr ? JSON.parse(authStr).token : null;
+  } catch (e) { 
+    console.error("Error in fallback getAuthToken:", e);
+    return null; 
   }
 };
 
 // Other placeholder functions
-let loginWithGoogle = () => Promise.reject(new Error("Auth module not loaded"));
+let loginWithGoogle = () => {
+  console.error("Auth module not loaded - loginWithGoogle not available");
+  return Promise.reject(new Error("Auth module not loaded"));
+};
 let openPaymentPage = () => Promise.reject(new Error("Auth module not loaded"));
 let getCreditPackages = () => Promise.reject(new Error("Auth module not loaded"));
 let updateUserData = () => false;
 
-// Completely revise loadAuthModule function for maximum reliability
+// Improved loadAuthModule function with better error handling and resilience
 async function loadAuthModule() {
+  console.log("Loading auth module - start");
+  
   try {
-    console.log("Loading auth module...");
-    
-    // First check if already loaded in window
+    // First, check if the module is already loaded and accessible
     if (window.chessAuthModule && window.chessAuthModule.isInitialized) {
       console.log("Auth module already available in window");
+      assignAuthFunctions(window.chessAuthModule);
       return window.chessAuthModule;
     }
     
-    // Create a basic fallback auth module
-    const fallbackModule = {
-      isInitialized: true,
-      isAuthenticated: async function() {
-        try {
-          const authStr = localStorage.getItem('chess_assistant_auth');
-          return !!authStr && !!JSON.parse(authStr).token;
-        } catch (e) { 
-          console.error("Error in isAuthenticated:", e);
-          return false; 
-        }
-      },
-      isAuthenticatedSync: function() {
-        try {
-          const authStr = localStorage.getItem('chess_assistant_auth');
-          return !!authStr && !!JSON.parse(authStr).token;
-        } catch (e) { 
-          console.error("Error in isAuthenticatedSync:", e);
-          return false; 
-        }
-      },
-      getCurrentUser: function() {
-        try {
-          const authStr = localStorage.getItem('chess_assistant_auth');
-          return authStr ? JSON.parse(authStr).user : null;
-        } catch (e) { 
-          console.error("Error in getCurrentUser:", e);
-          return null; 
-        }
-      },
-      getAuthToken: function() {
-        try {
-          const authStr = localStorage.getItem('chess_assistant_auth');
-          return authStr ? JSON.parse(authStr).token : null;
-        } catch (e) { 
-          console.error("Error in getAuthToken:", e);
-          return null; 
-        }
-      },
-      clearAuth: function() {
-        try {
-          localStorage.removeItem('chess_assistant_auth');
-          localStorage.removeItem('chess_assistant_token');
-        } catch (e) {
-          console.error("Error in clearAuth:", e);
-        }
-      }
-    };
+    // Create a fallback module first, in case script loading fails
+    createFallbackAuthModule();
     
-    // Assign fallback to window immediately to avoid future loading issues
-    window.chessAuthModule = window.chessAuthModule || fallbackModule;
+    // Now try to load the actual auth script
+    console.log("Injecting auth script to page");
     
-    try {
-      // Load the actual auth script
-      console.log("Loading auth script file");
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('src/auth/auth-storage.js');
-      script.type = 'text/javascript';
+    // If we're in a content script context, we need to inject the auth script
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('src/auth/auth-storage.js');
+    script.type = 'text/javascript';
+    
+    // Create a promise to track script loading
+    const loadPromise = new Promise((resolve) => {
+      script.onload = () => {
+        console.log("Auth script loaded successfully");
+        
+        // Check if the module is available and initialized
+        if (window.chessAuthModule && window.chessAuthModule.isInitialized) {
+          console.log("Auth module initialized after script load");
+          // Force initialize if needed
+          window.chessAuthModule.isInitialized = true;
+          assignAuthFunctions(window.chessAuthModule);
+          resolve(window.chessAuthModule);
+        } else {
+          console.warn("Auth script loaded but module not initialized");
+          // We already have a fallback module created, let's keep using it
+          console.log("Using fallback auth module instead");
+          resolve(window.chessAuthModule);
+        }
+      };
       
-      // This will load the script but not wait for it
-      document.head.appendChild(script);
+      script.onerror = (error) => {
+        console.error("Error loading auth script:", error);
+        // We already have a fallback module created, let's use it
+        console.log("Using fallback auth module due to script load error");
+        resolve(window.chessAuthModule);
+      };
       
-      // Set a brief timeout to wait for script to potentially load
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Return whatever auth module we have at this point
-      return window.chessAuthModule || fallbackModule;
-    } catch (scriptError) {
-      console.error("Error loading auth script:", scriptError);
-      return window.chessAuthModule || fallbackModule;
+      // Set a timeout in case the script loads but doesn't initialize properly
+      setTimeout(() => {
+        if (!window.chessAuthModule || !window.chessAuthModule.isInitialized) {
+          console.warn("Auth module initialization timed out");
+          // Force initialization if the module exists
+          if (window.chessAuthModule) {
+            window.chessAuthModule.isInitialized = true;
+            assignAuthFunctions(window.chessAuthModule);
+          }
+          resolve(window.chessAuthModule);
+        }
+      }, 2000);
+    });
+    
+    // Inject the script
+    document.head.appendChild(script);
+    
+    // Wait for script to load and return the module
+    await loadPromise;
+    
+    // Double check initialization status
+    if (window.chessAuthModule && !window.chessAuthModule.isInitialized) {
+      console.log("Forcing module initialization after load");
+      window.chessAuthModule.isInitialized = true;
     }
+    
+    console.log("Auth module load complete");
+    return window.chessAuthModule;
   } catch (error) {
-    console.error("Critical error in loadAuthModule:", error);
-    // Return a minimal fallback module
-    return {
-      isInitialized: true,
-      isAuthenticated: async () => false,
-      isAuthenticatedSync: () => false,
-      getCurrentUser: () => null,
-      getAuthToken: () => null,
-      clearAuth: () => {}
-    };
+    console.error("Fatal error in loadAuthModule:", error);
+    
+    // Make sure we always have at least the fallback module
+    if (!window.chessAuthModule) {
+      console.log("Creating emergency fallback auth module after error");
+      createFallbackAuthModule();
+    }
+    
+    return window.chessAuthModule;
   }
+}
+
+// Helper function to create a fallback auth module
+function createFallbackAuthModule() {
+  console.log("Creating fallback auth module");
+  
+  window.chessAuthModule = {
+    isInitialized: true,
+    
+    isAuthenticated: async function() { 
+      try {
+        const authStr = localStorage.getItem('chess_assistant_auth');
+        return !!authStr && !!JSON.parse(authStr).token;
+      } catch (e) { return false; }
+    },
+    
+    isAuthenticatedSync: function() {
+      try {
+        const authStr = localStorage.getItem('chess_assistant_auth');
+        return !!authStr && !!JSON.parse(authStr).token;
+      } catch (e) { return false; }
+    },
+    
+    getCurrentUser: async function() {
+      try {
+        const authStr = localStorage.getItem('chess_assistant_auth');
+        return authStr ? JSON.parse(authStr).user : null;
+      } catch (e) { return null; }
+    },
+    
+    getAuthToken: async function() {
+      try {
+        const authStr = localStorage.getItem('chess_assistant_auth');
+        return authStr ? JSON.parse(authStr).token : null;
+      } catch (e) { return null; }
+    },
+    
+    clearAuth: async function() {
+      try {
+        localStorage.removeItem('chess_assistant_auth');
+        localStorage.removeItem('chess_assistant_token');
+        return true;
+      } catch (e) { return false; }
+    },
+    
+    saveAuthData: async function(authData) {
+      try {
+        if (!authData || !authData.token) return false;
+        
+        const storageData = {
+          isAuthenticated: true,
+          token: authData.token || authData.access_token,
+          user: authData.user || {}
+        };
+        
+        localStorage.setItem('chess_assistant_auth', JSON.stringify(storageData));
+        localStorage.setItem('chess_assistant_token', JSON.stringify(authData));
+        return true;
+      } catch (e) { return false; }
+    },
+    
+    // Limited implementation of other functions
+    loginWithGoogle: async function() {
+      // Try to call the background script
+      return new Promise((resolve, reject) => {
+        try {
+          chrome.runtime.sendMessage({ action: "initiate_google_auth" }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error("Error connecting to background script"));
+            } else {
+              resolve(response || { success: true });
+            }
+          });
+        } catch (e) {
+          reject(new Error("Failed to initiate login"));
+        }
+      });
+    },
+    
+    getCreditPackages: async function() {
+      return [];
+    },
+    
+    openPaymentPage: async function() {
+      return { success: false, error: "Auth module not fully loaded" };
+    },
+    
+    updateUserData: async function() {
+      return false;
+    }
+  };
+  
+  // Assign the fallback functions
+  assignAuthFunctions(window.chessAuthModule);
 }
 
 // Assign auth functions from the module
 function assignAuthFunctions(module) {
+  if (!module) {
+    console.error("Cannot assign auth functions from null module");
+    return;
+  }
+  
+  console.log("Assigning auth functions from module");
+  
   // Assign all functions from the module
   isAuthenticated = module.isAuthenticated;
   getCurrentUser = module.getCurrentUser;
+  getAuthToken = module.getAuthToken;
   loginWithGoogle = module.loginWithGoogle;
   openPaymentPage = module.openPaymentPage;
   getCreditPackages = module.getCreditPackages;
-  getAuthToken = module.getAuthToken;
   updateUserData = module.updateUserData;
   
-  console.log("Auth functions assigned, authenticated:", isAuthenticated());
+  const authenticated = module.isAuthenticatedSync ? 
+    module.isAuthenticatedSync() : 
+    false;
   
-  // Update the UI based on auth state
-  const userInfoPanel = document.getElementById('user-info-panel');
-  if (userInfoPanel) {
-    updateUserPanel(userInfoPanel);
-  }
-  
-  // Update ask button state
-  updateAskButtonState();
+  console.log("Auth functions assigned, authenticated:", authenticated);
 }
 
 // Create a global variable to keep track of the sidebar state
@@ -208,7 +377,31 @@ async function initializeSidebar() {
     
     // Check if sidebar already exists
     if (document.getElementById('chess-analysis-sidebar')) {
-      console.log("Sidebar already exists, skipping initialization");
+      console.log("Sidebar already exists, refreshing auth state");
+      
+      // Refresh auth state even if sidebar exists
+      try {
+        chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+          if (chrome.runtime.lastError) {
+            console.error("Error getting auth state during refresh:", chrome.runtime.lastError);
+            return;
+          }
+          
+          console.log("Refreshed auth state:", response);
+          
+          // Update the user panel with the latest auth state
+          const userInfoPanel = document.getElementById('user-info-panel');
+          if (userInfoPanel && response) {
+            window.chessAnalyzerExtension.updateUserInfoSection(response.isAuthenticated, response.user);
+          }
+          
+          // Update ask button state
+          updateAskButtonState();
+        });
+      } catch (refreshError) {
+        console.error("Error refreshing auth state:", refreshError);
+      }
+      
       sidebarInitialized = true;
       return;
     }
@@ -323,8 +516,35 @@ function toggleSidebar() {
 
 // Function to update user panel
 function updateUserPanel(panel) {
-  console.log("Updating user panel");
+  console.log("Updating user panel with enhanced check");
   
+  try {
+    // Check with background script first for most accurate state
+    chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+      if (chrome.runtime.lastError) {
+        console.error("Error getting auth state from background:", chrome.runtime.lastError);
+        // Fall back to other methods
+        fallbackUpdateUserPanel(panel);
+      } else if (response) {
+        console.log("Got auth state from background:", response);
+        window.chessAnalyzerExtension.updateUserInfoSection(response.isAuthenticated, response.user);
+      } else {
+        console.warn("No response from background script, using fallback");
+        fallbackUpdateUserPanel(panel);
+      }
+    });
+  } catch (error) {
+    console.error("Error in updateUserPanel:", error);
+    panel.innerHTML = `
+      <div class="user-status-loading">
+        <p>Error checking login status</p>
+      </div>
+    `;
+  }
+}
+
+// Fallback method to update user panel
+function fallbackUpdateUserPanel(panel) {
   try {
     // Use safely scoped function
     if (window.chessAuthModule && window.chessAuthModule.isAuthenticatedSync) {
@@ -350,7 +570,7 @@ function updateUserPanel(panel) {
       window.chessAnalyzerExtension.updateUserInfoSection(isAuth, user);
     }
   } catch (error) {
-    console.error("Error in updateUserPanel:", error);
+    console.error("Error in fallbackUpdateUserPanel:", error);
     panel.innerHTML = `
       <div class="user-status-loading">
         <p>Error checking login status</p>
@@ -361,9 +581,52 @@ function updateUserPanel(panel) {
 
 // Function to update ask button state
 function updateAskButtonState() {
+  console.log("Updating ask button state with enhanced auth check");
   const askButton = document.getElementById('ask-button');
   if (!askButton) return;
   
+  // Get auth state from background script for most accurate information
+  chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+    if (chrome.runtime.lastError) {
+      console.error("Error getting auth state from background:", chrome.runtime.lastError);
+      // Fall back to other methods
+      updateAskButtonWithLocalAuth(askButton);
+    } else if (response) {
+      const authenticated = response.isAuthenticated;
+      const user = response.user;
+      
+      console.log("Got auth state from background for ask button:", authenticated, user);
+      
+      if (authenticated && user) {
+        if (user.credits > 0) {
+          askButton.disabled = false;
+          askButton.title = "";
+          askButton.style.opacity = "1";
+          askButton.style.cursor = "pointer";
+          console.log("Ask button enabled - user has credits");
+        } else {
+          askButton.disabled = true;
+          askButton.title = "You need credits to analyze positions";
+          askButton.style.opacity = "0.6";
+          askButton.style.cursor = "not-allowed";
+          console.log("Ask button disabled - no credits");
+        }
+      } else {
+        askButton.disabled = true;
+        askButton.title = "Login to analyze positions";
+        askButton.style.opacity = "0.6";
+        askButton.style.cursor = "not-allowed";
+        console.log("Ask button disabled - not authenticated");
+      }
+    } else {
+      console.warn("No response from background script, using fallback for ask button");
+      updateAskButtonWithLocalAuth(askButton);
+    }
+  });
+}
+
+// Fallback function to update ask button using local auth check
+function updateAskButtonWithLocalAuth(askButton) {
   if (isAuthenticated()) {
     const user = getCurrentUser();
     if (user && user.credits > 0) {
@@ -865,7 +1128,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   // Only process sidebar requests on chess sites
-  if (request.action === "showSidebar") {
+  if (request.action === "showSidebar" || request.action === "show_sidebar") {
     console.log("Show sidebar request received");
     
     // Check if we're on a chess site
@@ -991,9 +1254,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   // Handle auth state changes from background
   if (request.action === "auth_state_changed") {
-    console.log("Auth state changed:", request.isAuthenticated);
+    console.log("Auth state changed notification received:", request.isAuthenticated);
     
-    // Update UI elements
+    // Refresh auth state from background to get complete data
+    refreshAuthState();
+    
+    // Also update UI elements directly
     const userInfoPanel = document.getElementById('user-info-panel');
     if (userInfoPanel) {
       updateUserPanel(userInfoPanel);
@@ -1004,6 +1270,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     sendResponse({ success: true });
     return true;
+  }
+
+  // Add capture_board action handler 
+  if (request.action === "capture_board") {
+    console.log("Capture board request received");
+    
+    // Check if we're on a chess site
+    if (!isChessSite()) {
+      console.log("Not on a chess site, can't capture board");
+      sendResponse({ 
+        success: false, 
+        error: "Not on a supported chess site (Chess.com or Lichess)" 
+      });
+      return true;
+    }
+    
+    // Handle the capture request
+    try {
+      captureCurrentPosition()
+        .then(boardData => {
+          console.log("Board captured successfully");
+          sendResponse({ 
+            success: true,
+            message: "Board captured successfully" 
+          });
+        })
+        .catch(error => {
+          console.error("Error capturing board:", error);
+          sendResponse({ 
+            success: false, 
+            error: error.message || "Failed to capture chess board" 
+          });
+        });
+      
+      return true; // Indicates we'll send a response asynchronously
+    } catch (error) {
+      console.error("Error in capture_board handler:", error);
+      sendResponse({ 
+        success: false, 
+        error: error.message || "Error processing capture request" 
+      });
+      return true;
+    }
   }
 });
 
@@ -1027,6 +1336,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initialize sidebar
     initializeSidebar();
     ensureToggleButtonVisible();
+    
+    // Set up periodic auth state refresh
+    setupAuthRefresh();
   } catch (error) {
     console.error("Error during initialization:", error);
   }
@@ -1038,6 +1350,9 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   loadAuthModule().then(() => {
     initializeSidebar();
     ensureToggleButtonVisible();
+    
+    // Set up periodic auth state refresh
+    setupAuthRefresh();
   }).catch(error => {
     console.error("Error loading auth module:", error);
   });
@@ -1069,78 +1384,38 @@ window.addEventListener('chess_auth_changed', (event) => {
   updateAskButtonState();
 });
 
-// Make initializeAuth more resilient with multiple fallbacks
+// Make auth initialization more resilient with immediate fallbacks
 async function initializeAuth(maxRetries = 2) {
   try {
     console.log("Starting auth initialization");
-    
-    // Try to establish background connection first, but don't block on it
-    pingBackgroundScript().catch(e => {
-      console.warn("Background connection issue, continuing anyway:", e);
-    });
-    
-    // Load auth module - with a retry loop for reliability
-    let module = null;
-    let attempts = 0;
-    
-    while (!module && attempts < maxRetries) {
-      try {
-        module = await loadAuthModule();
-        console.log("Auth module loaded, attempt:", attempts + 1);
-      } catch (e) {
-        console.error(`Auth load attempt ${attempts + 1} failed:`, e);
-        attempts++;
-        
-        if (attempts < maxRetries) {
-          // Wait before retry
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
+    // Try a simple ping to check background connection first
+    try {
+      await pingBackgroundScript();
+      console.log("Background connection confirmed");
+    } catch (pingError) {
+      console.warn("Background connection issue, continuing anyway:", pingError);
     }
     
-    // If we still don't have a module, use a basic fallback
-    if (!module) {
-      console.warn("Using emergency fallback auth module after failed retries");
-      module = {
-        isInitialized: true,
-        isAuthenticated: async () => false,
-        isAuthenticatedSync: () => false,
-        getCurrentUser: () => null,
-        getAuthToken: () => null,
-        clearAuth: () => {}
-      };
-    }
+    // Load the auth module with minimal waiting
+    const module = await loadAuthModule();
+    console.log("Auth module loaded");
     
-    // Force initialized flag for safety
+    // Assign reference and functions
+    authModule = module;
+    
+    // Force isInitialized to true
     if (module) {
       module.isInitialized = true;
+      assignAuthFunctions(module);
+      console.log("Auth functions assigned");
+      return module;
     }
     
-    // Assign module and functions
-    authModule = module;
-    assignAuthFunctions(module);
-    console.log("Auth functions assigned");
-    
-    // Try to load localStorage data directly if needed
-    if (!await module.isAuthenticated()) {
-      try {
-        const authStr = localStorage.getItem('chess_assistant_auth');
-        if (authStr) {
-          console.log("Found auth data in localStorage, ensuring module is updated");
-          const authData = JSON.parse(authStr);
-          module.setAuthData?.(authData);
-        }
-      } catch (e) {
-        console.error("Error accessing localStorage:", e);
-      }
-    }
-    
-    return module;
+    throw new Error("Auth module not available");
   } catch (error) {
-    console.error("Critical auth initialization error, using basic fallback:", error);
-    
-    // Create an emergency fallback module
-    const emergencyModule = {
+    console.error("Auth init error, using fallback:", error);
+    // Create a fallback auth module
+    const fallbackModule = window.chessAuthModule || {
       isInitialized: true,
       isAuthenticated: async () => false,
       isAuthenticatedSync: () => false,
@@ -1149,12 +1424,13 @@ async function initializeAuth(maxRetries = 2) {
       clearAuth: () => {}
     };
     
-    // Assign emergency fallback
-    authModule = emergencyModule;
-    window.chessAuthModule = emergencyModule;
-    assignAuthFunctions(emergencyModule);
+    // Set the fallback
+    authModule = fallbackModule;
+    window.chessAuthModule = fallbackModule;
+    assignAuthFunctions(fallbackModule);
     
-    return emergencyModule;
+    // Return the fallback
+    return fallbackModule;
   }
 }
 
@@ -1243,8 +1519,27 @@ async function handleQuestionSubmit(inputElement, responseArea) {
 
 // Check if we're on a chess site before initializing
 function isChessSite() {
-  const url = window.location.href;
-  return url.includes('chess.com') || url.includes('lichess.org');
+  try {
+    const url = window.location.href || '';
+    console.log("Checking if current URL is a chess site:", url);
+    
+    // Allow debugging on any page if needed
+    const DEBUG_MODE = true; // Set to false in production
+    if (DEBUG_MODE) {
+      console.log("DEBUG MODE: Treating all pages as chess sites for testing");
+      return true;
+    }
+    
+    // Standard detection for production
+    return url.includes('chess.com') || 
+           url.includes('lichess.org') || 
+           url.includes('chess24.com') || 
+           url.includes('chesstempo.com');
+  } catch (error) {
+    console.error("Error in isChessSite check:", error);
+    // Default to false if there's an error
+    return false;
+  }
 }
 
 // Only run on chess sites
@@ -1266,7 +1561,7 @@ if (isChessSite()) {
     }
     
     // Only process sidebar requests on chess sites
-    if (request.action === "showSidebar") {
+    if (request.action === "showSidebar" || request.action === "show_sidebar") {
       console.log("Show sidebar request received");
       
       // Create a promise to handle the async operations
@@ -1345,7 +1640,7 @@ window.chessAnalyzerExtension = window.chessAnalyzerExtension || {};
 
 // Define the updateUserInfoSection function once
 window.chessAnalyzerExtension.updateUserInfoSection = function(authenticated, user) {
-  console.log("Updating user info section:", authenticated, user);
+  console.log("Updating user info section. Auth state:", authenticated, "User:", user);
   
   const userInfoPanel = document.getElementById('user-info-panel');
   if (!userInfoPanel) {
@@ -1353,86 +1648,102 @@ window.chessAnalyzerExtension.updateUserInfoSection = function(authenticated, us
     return;
   }
   
-  if (authenticated && user) {
-    userInfoPanel.innerHTML = `
-      <div class="user-logged-in" style="display: flex; justify-content: space-between; align-items: center;">
-        <div class="user-details">
-          <span class="user-name" style="font-weight: 500; font-size: 14px; margin-bottom: 4px; display: block;">
-            ${user.full_name || user.email || 'User'}
-          </span>
-          <div class="credits-display" style="display: flex; align-items: center; gap: 4px;">
-            <span class="credits-count" style="color: #34a853; font-weight: 600; font-size: 15px;">
-              ${user.credits || 0}
+  // Check with background script for latest auth state
+  chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+    if (chrome.runtime.lastError) {
+      console.error("Error getting auth state from background:", chrome.runtime.lastError);
+      // Continue with the provided auth state as fallback
+    } else if (response) {
+      console.log("Received auth state from background:", response);
+      // Override with latest state from background script
+      authenticated = response.isAuthenticated;
+      user = response.user;
+    }
+    
+    // Now update the UI with the most accurate auth state
+    if (authenticated && user) {
+      console.log("Showing logged in UI with user:", user);
+      userInfoPanel.innerHTML = `
+        <div class="user-logged-in" style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="user-details">
+            <span class="user-name" style="font-weight: 500; font-size: 14px; margin-bottom: 4px; display: block;">
+              ${user.full_name || user.email || 'User'}
             </span>
-            <span class="credits-label" style="color: #666; font-size: 13px;">credits</span>
+            <div class="credits-display" style="display: flex; align-items: center; gap: 4px;">
+              <span class="credits-count" style="color: #34a853; font-weight: 600; font-size: 15px;">
+                ${user.credits || 0}
+              </span>
+              <span class="credits-label" style="color: #666; font-size: 13px;">credits</span>
+            </div>
           </div>
+          <button id="sidebar-logout-btn" style="background: none; border: none; color: #4285f4; cursor: pointer;">
+            Logout
+          </button>
         </div>
-        <button id="sidebar-logout-btn" style="background: none; border: none; color: #4285f4; cursor: pointer;">
-          Logout
-        </button>
-      </div>
-    `;
-    
-    // Add logout button listener
-    setTimeout(() => {
-      const logoutBtn = document.getElementById('sidebar-logout-btn');
-      if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-          try {
-            chrome.runtime.sendMessage({ action: "logout" }, response => {
-              if (chrome.runtime.lastError) {
-                console.error("Logout error:", chrome.runtime.lastError);
-                return;
-              }
-              
-              // Update UI after logout
-              window.chessAnalyzerExtension.updateUserInfoSection(false, null);
-            });
-          } catch (e) {
-            console.error("Error sending logout message:", e);
-          }
-        });
-      }
-    }, 0);
-  } else {
-    userInfoPanel.innerHTML = `
-      <div class="user-logged-out" style="text-align: center;">
-        <p style="margin-bottom: 10px;">Login to use AI chess analysis</p>
-        <button id="sidebar-login-btn" style="background-color: #4285f4; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">
-          Login with Google
-        </button>
-      </div>
-    `;
-    
-    // Add login button listener
-    setTimeout(() => {
-      const loginBtn = document.getElementById('sidebar-login-btn');
-      if (loginBtn) {
-        loginBtn.addEventListener('click', () => {
-          loginBtn.textContent = "Logging in...";
-          loginBtn.disabled = true;
-          
-          try {
-            chrome.runtime.sendMessage({ action: "login" }, response => {
-              if (chrome.runtime.lastError) {
-                console.error("Login error:", chrome.runtime.lastError);
-                loginBtn.textContent = "Login with Google";
-                loginBtn.disabled = false;
-                return;
-              }
-              
-              console.log("Login initiated by background script");
-              // The background script will handle the rest
-            });
-          } catch (e) {
-            console.error("Error sending login message:", e);
-            loginBtn.textContent = "Login with Google";
-            loginBtn.disabled = false;
-          }
-        });
-      }
-    }, 0);
-  }
+      `;
+      
+      // Add logout button listener
+      setTimeout(() => {
+        const logoutBtn = document.getElementById('sidebar-logout-btn');
+        if (logoutBtn) {
+          logoutBtn.addEventListener('click', () => {
+            try {
+              chrome.runtime.sendMessage({ action: "logout" }, response => {
+                if (chrome.runtime.lastError) {
+                  console.error("Logout error:", chrome.runtime.lastError);
+                  return;
+                }
+                
+                // Update UI after logout
+                window.chessAnalyzerExtension.updateUserInfoSection(false, null);
+              });
+            } catch (e) {
+              console.error("Error sending logout message:", e);
+            }
+          });
+        }
+      }, 0);
+    } else {
+      console.log("Showing logged out UI");
+      userInfoPanel.innerHTML = `
+        <div class="user-logged-out" style="text-align: center;">
+          <p style="margin-bottom: 10px;">Login to use AI chess analysis</p>
+          <button id="sidebar-login-btn" style="background-color: #4285f4; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">
+            Login
+          </button>
+        </div>
+      `;
+      
+      // Add login button listener
+      setTimeout(() => {
+        const loginBtn = document.getElementById('sidebar-login-btn');
+        if (loginBtn) {
+          loginBtn.addEventListener('click', () => {
+            loginBtn.textContent = "Opening login...";
+            loginBtn.disabled = true;
+            
+            try {
+              // Open the popup for login instead of using Google auth
+              chrome.runtime.sendMessage({ action: "open_popup" }, response => {
+                if (chrome.runtime.lastError) {
+                  console.error("Error opening popup:", chrome.runtime.lastError);
+                  loginBtn.textContent = "Login";
+                  loginBtn.disabled = false;
+                  return;
+                }
+                
+                console.log("Login popup opened");
+              });
+            } catch (e) {
+              console.error("Error sending open_popup message:", e);
+              loginBtn.textContent = "Login";
+              loginBtn.disabled = false;
+            }
+          });
+        }
+      }, 0);
+    }
+  });
 };
 
 // Add a safe messaging function to handle connection errors
@@ -1681,3 +1992,95 @@ document.addEventListener('DOMContentLoaded', () => {
       // Show error message to user if needed
     });
 });
+
+// Function to periodically refresh auth state
+function setupAuthRefresh() {
+  console.log("Setting up periodic auth state refresh");
+  
+  // Refresh auth state immediately
+  refreshAuthState();
+  
+  // Then refresh every 30 seconds
+  setInterval(refreshAuthState, 30000);
+}
+
+// Function to refresh auth state from background
+function refreshAuthState() {
+  console.log("Refreshing auth state from background");
+  
+  try {
+    chrome.runtime.sendMessage({ action: 'get_auth_state' }, response => {
+      if (chrome.runtime.lastError) {
+        console.error("Error getting auth state during refresh:", chrome.runtime.lastError);
+        return;
+      }
+      
+      if (!response) {
+        console.warn("No response received from background during auth refresh");
+        return;
+      }
+      
+      console.log("Received refreshed auth state:", response);
+      
+      // Update localStorage with the latest auth state
+      try {
+        const authStr = localStorage.getItem('chess_assistant_auth');
+        if (authStr) {
+          const authData = JSON.parse(authStr);
+          
+          // Check if the auth state has changed
+          const stateChanged = 
+            authData.token !== response.token || 
+            !authData.user || 
+            !response.user ||
+            authData.user.email !== response.user.email ||
+            authData.user.credits !== response.user.credits;
+          
+          if (stateChanged) {
+            console.log("Auth state changed, updating localStorage and UI");
+            
+            // Update localStorage
+            const newAuthData = {
+              token: response.token,
+              user: response.user,
+              timestamp: Date.now()
+            };
+            localStorage.setItem('chess_assistant_auth', JSON.stringify(newAuthData));
+            
+            // Update UI elements
+            const userInfoPanel = document.getElementById('user-info-panel');
+            if (userInfoPanel) {
+              window.chessAnalyzerExtension.updateUserInfoSection(response.isAuthenticated, response.user);
+            }
+            
+            // Update ask button state
+            updateAskButtonState();
+          }
+        } else if (response.isAuthenticated) {
+          // No local auth data but we're authenticated in background
+          console.log("No local auth data but authenticated in background, updating localStorage");
+          
+          const newAuthData = {
+            token: response.token,
+            user: response.user,
+            timestamp: Date.now()
+          };
+          localStorage.setItem('chess_assistant_auth', JSON.stringify(newAuthData));
+          
+          // Update UI elements
+          const userInfoPanel = document.getElementById('user-info-panel');
+          if (userInfoPanel) {
+            window.chessAnalyzerExtension.updateUserInfoSection(response.isAuthenticated, response.user);
+          }
+          
+          // Update ask button state
+          updateAskButtonState();
+        }
+      } catch (e) {
+        console.error("Error updating localStorage during auth refresh:", e);
+      }
+    });
+  } catch (error) {
+    console.error("Error refreshing auth state:", error);
+  }
+}

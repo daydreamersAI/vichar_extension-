@@ -15,7 +15,22 @@ window.API_URL = window.API_URL || 'https://api.beekayprecision.com';
 // Add a cache for auth data to avoid repeated storage access
 window.chessAuthModule._cachedAuthData = null;
 
+// Add initialization timestamp for debugging
+window.chessAuthModule._initTimestamp = Date.now();
+
 console.log("Auth module set as initialized at load time");
+
+// Enhanced error handling wrapper for all methods
+function safeMethod(fn, defaultValue) {
+  return function(...args) {
+    try {
+      return fn.apply(this, args);
+    } catch (error) {
+      console.error(`Auth method error:`, error);
+      return defaultValue;
+    }
+  }
+}
 
 // Check if user is authenticated
 window.chessAuthModule.isAuthenticated = async function() {
@@ -102,19 +117,33 @@ window.chessAuthModule.getAuthData = function() {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       // First try chrome.storage.local
       return new Promise((resolve) => {
-        chrome.storage.local.get(['authToken', 'userData'], (result) => {
-          if (result.authToken) {
-            resolve({
-              isAuthenticated: true,
-              token: result.authToken,
-              user: result.userData
-            });
-            return;
-          }
-          
-          // If not in chrome.storage, try localStorage
+        try {
+          chrome.storage.local.get(['authToken', 'userData'], (result) => {
+            if (chrome.runtime.lastError) {
+              console.warn("Chrome storage error:", chrome.runtime.lastError);
+              tryLocalStorage(resolve);
+              return;
+            }
+            
+            if (result.authToken) {
+              const data = {
+                isAuthenticated: true,
+                token: result.authToken,
+                user: result.userData
+              };
+              // Update cache
+              window.chessAuthModule._cachedAuthData = data;
+              resolve(data);
+              return;
+            }
+            
+            // If not in chrome.storage, try localStorage
+            tryLocalStorage(resolve);
+          });
+        } catch (e) {
+          console.error("Error accessing chrome.storage:", e);
           tryLocalStorage(resolve);
-        });
+        }
       });
     } else {
       // Chrome storage not available, use localStorage only
@@ -129,33 +158,86 @@ window.chessAuthModule.getAuthData = function() {
   
   // Helper function to try localStorage
   function tryLocalStorage(resolve) {
-    let authDataStr = localStorage.getItem('chess_assistant_auth');
-    if (!authDataStr) {
-      const tokenDataStr = localStorage.getItem('chess_assistant_token');
-      if (tokenDataStr) {
-        try {
-          const parsedToken = JSON.parse(tokenDataStr);
-          const authData = {
-            isAuthenticated: true,
-            token: parsedToken.access_token,
-            user: parsedToken.user
-          };
-          resolve(authData);
-          return;
-        } catch (e) {
-          console.error('Error parsing token data:', e);
+    try {
+      let authDataStr = localStorage.getItem('chess_assistant_auth');
+      if (!authDataStr) {
+        const tokenDataStr = localStorage.getItem('chess_assistant_token');
+        if (tokenDataStr) {
+          try {
+            const parsedToken = JSON.parse(tokenDataStr);
+            const authData = {
+              isAuthenticated: true,
+              token: parsedToken.access_token,
+              user: parsedToken.user
+            };
+            // Update cache
+            window.chessAuthModule._cachedAuthData = authData;
+            resolve(authData);
+            return;
+          } catch (e) {
+            console.error('Error parsing token data:', e);
+          }
         }
+        // No auth data found
+        resolve(null);
+        return;
       }
+      
+      try {
+        const authData = JSON.parse(authDataStr);
+        // Update cache
+        window.chessAuthModule._cachedAuthData = authData;
+        resolve(authData);
+      } catch (e) {
+        console.error('Error parsing auth data:', e);
+        resolve(null);
+      }
+    } catch (e) {
+      console.error("Error accessing localStorage:", e);
       resolve(null);
-      return;
+    }
+  }
+}
+
+// Add a synchronous version for immediate access
+window.chessAuthModule.getAuthDataSync = function() {
+  try {
+    // First check cache
+    if (window.chessAuthModule._cachedAuthData) {
+      return window.chessAuthModule._cachedAuthData;
     }
     
+    // Try localStorage
     try {
-      resolve(JSON.parse(authDataStr));
+      const authDataStr = localStorage.getItem('chess_assistant_auth');
+      if (authDataStr) {
+        const authData = JSON.parse(authDataStr);
+        // Update cache
+        window.chessAuthModule._cachedAuthData = authData;
+        return authData;
+      }
+      
+      // Try alternate storage
+      const tokenDataStr = localStorage.getItem('chess_assistant_token');
+      if (tokenDataStr) {
+        const parsedToken = JSON.parse(tokenDataStr);
+        const authData = {
+          isAuthenticated: true,
+          token: parsedToken.access_token,
+          user: parsedToken.user
+        };
+        // Update cache
+        window.chessAuthModule._cachedAuthData = authData;
+        return authData;
+      }
     } catch (e) {
-      console.error('Error parsing auth data:', e);
-      resolve(null);
+      console.error("Error reading from localStorage:", e);
     }
+    
+    return null;
+  } catch (error) {
+    console.error('Error in sync auth data access:', error);
+    return null;
   }
 }
 
