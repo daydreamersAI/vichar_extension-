@@ -9,11 +9,23 @@ const API_CONFIG = {
   // Endpoints
   endpoints: {
     analysis: "/analysis",
+    analysisWithCredit: "/analysis-with-credit",
     validateFen: "/validate/fen",
     validatePgn: "/validate/pgn",
     convertFenToPgn: "/convert/fen-to-pgn",
     register: "/register",
-    login: "/login"
+    login: "/login",
+    // Payment endpoints
+    creditPackages: "/payments/credits/packages",
+    createOrder: "/payments/create-order",
+    verifyPayment: "/payments/verify-payment",
+    userCredits: "/user/credits",
+    health: "/health"
+  },
+  
+  // Razorpay configuration
+  razorpay: {
+    keyId: "rzp_test_JB7DxS1VpotPXc", // Replace with your actual key in production
   },
   
   // Request timeout in milliseconds
@@ -81,6 +93,17 @@ async function analyzePosition(message, fen, imageData = null, pgn = null, chatH
   });
 }
 
+// Function for analysis with credit deduction
+async function analyzeWithCredit(message, fen, imageData = null, pgn = null, chatHistory = []) {
+  return callApi(API_CONFIG.endpoints.analysisWithCredit, {
+    message: message,
+    fen: fen,
+    pgn: pgn,
+    image_data: imageData,
+    chat_history: chatHistory
+  });
+}
+
 // Authentication functions
 async function registerUser(email, password, name) {
   return callApi(API_CONFIG.endpoints.register, {
@@ -95,6 +118,25 @@ async function loginUser(email, password) {
     email: email,
     password: password
   });
+}
+
+// Payment functions
+async function getCreditPackages() {
+  return callApi(API_CONFIG.endpoints.creditPackages, {}, 'GET');
+}
+
+async function createOrder(packageId) {
+  return callApi(API_CONFIG.endpoints.createOrder, {
+    package_id: packageId
+  });
+}
+
+async function verifyPayment(paymentData) {
+  return callApi(API_CONFIG.endpoints.verifyPayment, paymentData);
+}
+
+async function getUserCredits() {
+  return callApi(API_CONFIG.endpoints.userCredits, {}, 'GET');
 }
 
 // Helper function to store authentication token
@@ -127,8 +169,13 @@ export {
   getApiUrl,
   callApi,
   analyzePosition,
+  analyzeWithCredit,
   registerUser,
   loginUser,
+  getCreditPackages,
+  createOrder,
+  verifyPayment,
+  getUserCredits,
   storeAuthToken,
   getAuthToken,
   isLoggedIn,

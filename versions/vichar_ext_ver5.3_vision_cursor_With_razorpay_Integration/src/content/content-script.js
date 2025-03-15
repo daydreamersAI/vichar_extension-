@@ -9,12 +9,79 @@ let sidebarInitialized = false;
 let sidebarVisible = false;
 
 // API configuration - updated to match your deployment
-const API_URL = "https://api.beekayprecision.com"; // Updated to use HTTPS
+const API_URL = "https://api.beekayprecision.com"; // Using HTTPS for security
+
+// Function to check if user is logged in
+function isLoggedIn() {
+  // Check both localStorage and chrome.storage.local
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    console.log("Found auth token in localStorage");
+    return true;
+  }
+  
+  // If not found in localStorage, we'll return false for now
+  // We'll handle chrome.storage.local separately since it's asynchronous
+  console.log("No auth token found in localStorage");
+  return false;
+}
+
+// Async version of isLoggedIn that checks both localStorage and chrome.storage.local
+function checkLoginStatus() {
+  return new Promise((resolve) => {
+    // First check localStorage
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      console.log("Found auth token in localStorage");
+      resolve(true);
+      return;
+    }
+    
+    // If not in localStorage, check chrome.storage.local
+    chrome.storage.local.get(['auth_token'], (result) => {
+      if (result && result.auth_token) {
+        console.log("Found auth token in chrome.storage.local");
+        // Save to localStorage for future checks
+        localStorage.setItem('auth_token', result.auth_token);
+        
+        // Also get and save user info if available
+        chrome.storage.local.get(['user_id', 'user_name'], (userInfo) => {
+          if (userInfo.user_id) localStorage.setItem('user_id', userInfo.user_id);
+          if (userInfo.user_name) localStorage.setItem('user_name', userInfo.user_name);
+          console.log("Sync'd auth data from chrome.storage to localStorage");
+        });
+        
+        resolve(true);
+      } else {
+        console.log("No auth token found in chrome.storage.local either");
+        resolve(false);
+      }
+    });
+  });
+}
+
+// Check chrome.storage.local for token (asynchronous version)
+// This function is kept for backward compatibility but uses the new checkLoginStatus internally
+function checkChromeStorage() {
+  console.log("Using updated checkChromeStorage that leverages checkLoginStatus");
+  checkLoginStatus().then(isLoggedIn => {
+    if (isLoggedIn && !sidebarInitialized) {
+      initializeSidebar();
+    }
+  });
+}
 
 // Function to create and initialize the sidebar
-function initializeSidebar() {
+async function initializeSidebar() {
   if (sidebarInitialized) {
     return; // Don't initialize twice
+  }
+  
+  // Check if user is logged in before initializing sidebar
+  const isUserLoggedIn = await checkLoginStatus();
+  if (!isUserLoggedIn) {
+    console.log("User not logged in, not initializing sidebar");
+    return; // Don't initialize the sidebar if not logged in
   }
   
   console.log("Initializing sidebar elements");
@@ -93,6 +160,66 @@ function initializeSidebar() {
   `;
   closeButton.addEventListener('click', toggleSidebar);
   header.appendChild(closeButton);
+  
+  // User welcome and logout section
+  const userSection = document.createElement('div');
+  userSection.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background-color: #e8f0fe;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  `;
+  
+  // Get user name from storage
+  let userName = localStorage.getItem('user_name') || 'User';
+  
+  // If not in localStorage, try chrome.storage.local
+  if (userName === 'User') {
+    chrome.storage.local.get(['user_name'], (result) => {
+      if (result && result.user_name) {
+        userName = result.user_name;
+        // Update the welcome message
+        welcomeMessage.innerHTML = `<span style="font-weight: 600;">Welcome back, </span><span style="font-weight: 700; color: #4285f4;">${userName}</span>`;
+      }
+    });
+  }
+  
+  // Welcome message
+  const welcomeMessage = document.createElement('div');
+  welcomeMessage.style.cssText = `
+    font-size: 14px;
+    color: #333;
+  `;
+  welcomeMessage.innerHTML = `<span style="font-weight: 600;">Welcome back, </span><span style="font-weight: 700; color: #4285f4;">${userName}</span>`;
+  
+  // Logout button
+  const logoutButton = document.createElement('button');
+  logoutButton.textContent = 'Logout';
+  logoutButton.style.cssText = `
+    padding: 5px 10px;
+    background-color: #f44336;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background-color 0.2s;
+  `;
+  logoutButton.addEventListener('mouseenter', () => {
+    logoutButton.style.backgroundColor = '#d32f2f';
+  });
+  logoutButton.addEventListener('mouseleave', () => {
+    logoutButton.style.backgroundColor = '#f44336';
+  });
+  logoutButton.addEventListener('click', handleLogout);
+  
+  userSection.appendChild(welcomeMessage);
+  userSection.appendChild(logoutButton);
   
   // Question input - MOVED TO TOP
   const questionContainer = document.createElement('div');
@@ -381,6 +508,7 @@ function initializeSidebar() {
   
   // Assemble the content - NEW ORDER
   content.appendChild(header);
+  content.appendChild(userSection);
   content.appendChild(questionContainer);     // 1. Question input
   content.appendChild(responseContainer);     // 2. Response area
   content.appendChild(captureButton);         // 3. Capture button
@@ -406,6 +534,40 @@ function toggleSidebar() {
   sidebarVisible = !sidebarVisible;
   sidebar.style.right = sidebarVisible ? '0' : '-400px';
   console.log("Sidebar visibility toggled:", sidebarVisible);
+}
+
+// Function to handle logout from sidebar
+function handleLogout() {
+  console.log("Logout clicked in sidebar");
+  
+  // Clear authentication data from localStorage
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('user_id');
+  localStorage.removeItem('user_name');
+  
+  // Also clear from chrome.storage.local
+  chrome.storage.local.remove(['auth_token', 'user_id', 'user_name'], () => {
+    console.log("Auth data removed from chrome.storage.local");
+    
+    // Hide the sidebar
+    const sidebar = document.getElementById('chess-analysis-sidebar');
+    if (sidebar) {
+      sidebarVisible = false;
+      sidebar.style.right = '-400px';
+    }
+    
+    // Reset sidebar initialization flag so it can be recreated if user logs in again
+    sidebarInitialized = false;
+    
+    // Remove sidebar elements from DOM
+    const sidebarElement = document.getElementById('chess-analysis-sidebar');
+    const toggleButton = document.getElementById('sidebar-toggle');
+    if (sidebarElement) sidebarElement.remove();
+    if (toggleButton) toggleButton.remove();
+    
+    // Show a notification that user has been logged out
+    alert("You have been logged out successfully");
+  });
 }
 
 // Function to capture the current chess position - FIXED
@@ -805,42 +967,92 @@ async function loadStoredBoardData() {
   }
 }
 
-// FIXED MESSAGE LISTENER - Add ping handler and improve response handling
+// Listen for messages from popup or background scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("Content script received message:", request);
+  console.log("Content script received message:", request.action);
   
-  // Add ping handler for extension health check
+  // Add ping handler for extension health check - prioritize this
   if (request.action === "ping") {
     console.log("Ping received, responding immediately");
-    sendResponse({ success: true });
+    sendResponse({ success: true, initialized: sidebarInitialized });
+    return true;
+  }
+  
+  // Handle user login event
+  if (request.action === "userLoggedIn") {
+    console.log("User logged in, initializing sidebar if needed");
+    
+    checkLoginStatus().then(async isLoggedIn => {
+      if (!sidebarInitialized && isLoggedIn) {
+        await initializeSidebar();
+        
+        // If sidebar was visible before, show it again
+        if (sidebarVisible) {
+          const sidebar = document.getElementById('chess-analysis-sidebar');
+          if (sidebar) {
+            sidebar.style.right = '0';
+          }
+        }
+      }
+      
+      sendResponse({ success: true });
+    });
+    
     return true;
   }
   
   if (request.action === "showSidebar") {
     console.log("Show sidebar request received");
     
-    try {
-      // Initialize the sidebar if not already done
-      if (!sidebarInitialized) {
-        initializeSidebar();
+    // Use async login check
+    checkLoginStatus().then(async isLoggedIn => {
+      try {
+        // If user is not logged in, show error
+        if (!isLoggedIn) {
+          console.log("User not logged in, cannot show sidebar");
+          sendResponse({ 
+            success: false, 
+            message: "Please log in to use this feature." 
+          });
+          return;
+        }
+        
+        // Initialize the sidebar if not already done
+        if (!sidebarInitialized) {
+          console.log("Initializing sidebar before showing it");
+          await initializeSidebar();
+        }
+        
+        // Show the sidebar if it was initialized successfully
+        if (sidebarInitialized) {
+          sidebarVisible = true;
+          const sidebar = document.getElementById('chess-analysis-sidebar');
+          if (sidebar) {
+            sidebar.style.right = '0';
+            console.log("Sidebar displayed");
+            sendResponse({ success: true });
+          } else {
+            console.error("Sidebar element not found after initialization");
+            sendResponse({ 
+              success: false, 
+              message: "Failed to create sidebar. Please reload the page and try again." 
+            });
+          }
+        } else {
+          console.error("Failed to initialize sidebar");
+          sendResponse({ 
+            success: false, 
+            message: "Failed to initialize sidebar. Please reload the page and try again." 
+          });
+        }
+      } catch (error) {
+        console.error("Error showing sidebar:", error);
+        sendResponse({ 
+          success: false, 
+          error: error.message 
+        });
       }
-      
-      // Show the sidebar
-      sidebarVisible = true;
-      const sidebar = document.getElementById('chess-analysis-sidebar');
-      if (sidebar) {
-        sidebar.style.right = '0';
-        console.log("Sidebar displayed");
-      } else {
-        console.error("Sidebar element not found");
-      }
-      
-      // Send response immediately
-      sendResponse({ success: true });
-    } catch (error) {
-      console.error("Error showing sidebar:", error);
-      sendResponse({ success: false, error: error.message });
-    }
+    });
     
     return true; // Keep the message channel open
   }
@@ -863,14 +1075,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Initialize the sidebar when the content script loads
 // But wait for the page to be fully loaded first
 document.addEventListener('DOMContentLoaded', () => {
-  console.log("DOM loaded, initializing sidebar");
-  initializeSidebar();
+  console.log("DOM loaded, checking login status before initializing sidebar");
+  
+  // Use the async login check
+  checkLoginStatus().then(isLoggedIn => {
+    if (isLoggedIn) {
+      console.log("User is logged in, initializing sidebar");
+      initializeSidebar(); // async function, no need to await here
+    } else {
+      console.log("User is not logged in, sidebar will not be initialized");
+    }
+  });
 });
 
-// If the page is already loaded, initialize immediately
+// If the page is already loaded, initialize immediately if logged in
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  console.log("Page already loaded, initializing sidebar immediately");
-  initializeSidebar();
+  console.log("Page already loaded, checking login status");
+  
+  // Use the async login check
+  checkLoginStatus().then(isLoggedIn => {
+    if (isLoggedIn) {
+      console.log("User is logged in, initializing sidebar immediately");
+      initializeSidebar(); // async function, no need to await here
+    } else {
+      console.log("User is not logged in, sidebar will not be initialized");
+    }
+  });
 }
 
 // Add this code to the bottom of your content-script.js for a one-time test

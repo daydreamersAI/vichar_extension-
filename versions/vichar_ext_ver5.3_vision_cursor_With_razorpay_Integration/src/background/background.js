@@ -227,15 +227,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     return true; // Indicates we'll send a response asynchronously
   }
-
-  if (message.action === "openRazorpayCheckout") {
-    const orderData = message.orderData;
-
-    // Open a new tab for Razorpay checkout
-    chrome.tabs.create({
-        url: `https://checkout.razorpay.com/v1/checkout.js?order_id=${orderData.razorpay_order_id}`
-    });
-}
 });
 
 // Process the captured chessboard image

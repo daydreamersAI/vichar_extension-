@@ -12,8 +12,7 @@
   "host_permissions": [
     "https://*.lichess.org/*",
     "https://*.chess.com/*",
-    "https://api.beekayprecision.com/*",
-    "https://api.razorpay.com/*"
+    "https://api.beekayprecision.com/*"
   ],
   "action": {
     "default_popup": "src/popup/popup.html",
@@ -57,8 +56,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://api.razorpay.com; worker-src 'self'; frame-src 'self' https://checkout.razorpay.com"
-  },
-
-  "permissions": ["tabs"]
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com"
+  }
 }

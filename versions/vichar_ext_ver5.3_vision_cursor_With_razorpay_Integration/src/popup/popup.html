@@ -95,82 +95,6 @@
       font-style: italic;
       color: #666;
     }
-    /* Credits styles */
-    .credits-container {
-      margin-top: 15px;
-      padding: 10px;
-      background-color: #f8f9fa;
-      border-radius: 4px;
-    }
-    .credits-title {
-      font-weight: bold;
-      margin-bottom: 8px;
-    }
-    .credits-count {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-      padding: 5px 10px;
-      background-color: #e3f2fd;
-      border-radius: 4px;
-    }
-    .credits-value {
-      font-weight: bold;
-      font-size: 18px;
-      color: #4285f4;
-    }
-    .package-container {
-      margin-top: 10px;
-    }
-    .package-title {
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-    .package-options {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .package-option {
-      flex: 1;
-      padding: 8px 5px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      text-align: center;
-      cursor: pointer;
-      font-size: 12px;
-      transition: all 0.2s;
-    }
-    .package-option:hover, .package-option.selected {
-      border-color: #4285f4;
-      background-color: #e3f2fd;
-    }
-    .package-option .credits {
-      font-weight: bold;
-      font-size: 14px;
-    }
-    .package-option .price {
-      color: #0F9D58;
-      font-weight: bold;
-    }
-    .buy-credits-btn {
-      background-color: #0F9D58;
-      margin-top: 5px;
-    }
-    .buy-credits-btn:hover {
-      background-color: #0B8043;
-    }
-    .premium-feature {
-      display: flex;
-      align-items: center;
-      margin-top: 5px;
-      font-size: 12px;
-    }
-    .premium-feature svg {
-      margin-right: 5px;
-      fill: #0F9D58;
-    }
   </style>
 </head>
 <body>
@@ -180,6 +104,19 @@
   <div id="userInfo" class="user-info hidden">
     <p>Welcome, <span id="userName"></span>!</p>
     <button id="logoutBtn">Logout</button>
+  </div>
+  
+  <!-- Credits container (shown when logged in) -->
+  <div id="creditsContainer" class="hidden">
+    <div class="credits-info">
+      <p>Your credits: <span id="user-credits">0</span></p>
+    </div>
+    <div id="credits-container" class="hidden">
+      <h3>Buy Credits</h3>
+      <div id="credit-packages">
+        <!-- Credit packages will be dynamically inserted here -->
+      </div>
+    </div>
   </div>
   
   <!-- Authentication container (shown when logged out) -->
@@ -230,41 +167,12 @@
     <button id="captureBtn" disabled>Capture & Open in New Tab</button>
   </div>
   
-  <!-- Credits Container (replacing subscription container) -->
-  <div id="creditsContainer" class="credits-container hidden">
-    <div class="credits-title">Your Credits</div>
-    <div class="credits-count">
-      <span>Available Credits:</span>
-      <span id="creditsValue" class="credits-value">0</span>
-    </div>
-    
-    <div class="package-container">
-      <div class="package-title">Buy Credits</div>
-      <div class="package-options">
-        <div class="package-option" data-package="basic" data-credits="50" data-amount="29900">
-          <div class="credits">50</div>
-          <div>credits</div>
-          <div class="price">₹299</div>
-        </div>
-        <div class="package-option" data-package="standard" data-credits="120" data-amount="59900">
-          <div class="credits">120</div>
-          <div>credits</div>
-          <div class="price">₹599</div>
-        </div>
-        <div class="package-option" data-package="premium" data-credits="300" data-amount="99900">
-          <div class="credits">300</div>
-          <div>credits</div>
-          <div class="price">₹999</div>
-        </div>
-      </div>
-      <button id="buyCreditsBtn" class="buy-credits-btn" disabled>Select a Package</button>
-    </div>
+  <!-- Status message container -->
+  <div id="statusContainer" class="status hidden">
+    <p id="statusMessage"></p>
   </div>
   
   <div id="status" class="status" style="display: none;"></div>
-  
-  <!-- Razorpay script -->
-  <script src="../lib/checkout.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
