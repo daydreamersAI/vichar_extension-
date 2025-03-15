@@ -41,14 +41,14 @@ app = FastAPI(title="Chess Assistant API")
 # OAuth2 password bearer token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
-# Add CORS middleware to allow requests from browser extensions
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Adjust this in production to be more specific
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# # Add CORS middleware to allow requests from browser extensions
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],  # Adjust this in production to be more specific
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # MongoDB connection with error handling
 try:
@@ -110,6 +110,9 @@ class Token(BaseModel):
 class SubscriptionOrderCreate(BaseModel):
     plan: str  # 'premium'
     interval: str  # 'monthly' or 'yearly'
+
+class CreditPurchaseCreate(BaseModel):
+    package: str  # 'basic', 'standard', or 'premium'
 
 class PaymentVerification(BaseModel):
     razorpay_payment_id: str
@@ -540,6 +543,28 @@ SUBSCRIPTION_PLANS = {
     }
 }
 
+# Credit Packages
+CREDIT_PACKAGES = {
+    "basic": {
+        "amount": 100,  # $1.00 in cents
+        "currency": "USD", 
+        "credits": 1000,
+        "description": "Basic Package - 1,000 Credits"
+    },
+    "standard": {
+        "amount": 450,  # $4.50 in cents
+        "currency": "USD",
+        "credits": 5000,
+        "description": "Standard Package - 5,000 Credits"
+    },
+    "premium": {
+        "amount": 1000,  # $10.00 in cents
+        "currency": "USD",
+        "credits": 12000,
+        "description": "Premium Package - 12,000 Credits" 
+    }
+}
+
 @app.post("/subscription/verify-payment")
 async def verify_payment(
     payment: PaymentVerification,
@@ -844,47 +869,342 @@ async def create_subscription_order(
             detail=f"Failed to create order: {str(e)}"
         )
 
+@app.post("/credits/create-order")
+async def create_credit_order(
+    order: CreditPurchaseCreate,
+    current_user = Depends(get_current_user)
+):
+    """Create a new Razorpay order for credit purchase"""
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required"
+        )
+        
+    # Validate package
+    if order.package not in CREDIT_PACKAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid credit package"
+        )
+    
+    # Get package details
+    package = CREDIT_PACKAGES[order.package]
+    
+    # Generate a receipt ID
+    receipt_id = f"cred_{current_user['id']}_{int(datetime.utcnow().timestamp())}"
+    
+    # Create order in Razorpay
+    try:
+        razorpay_order = client.order.create({
+            'amount': package['amount'],
+            'currency': package['currency'],
+            'receipt': receipt_id,
+            'payment_capture': 1,  # Auto-capture payment
+            'notes': {
+                'user_id': current_user["id"],
+                'type': 'credits',
+                'package': order.package,
+                'credits': package['credits']
+            }
+        })
+        
+        # Store the order reference in database
+        if MONGODB_ENABLED:
+            # Create credits collection if needed
+            if 'credits' not in db.list_collection_names():
+                credits_collection = db.create_collection("credits")
+                credits_collection.create_index("user_id")
+            else:
+                credits_collection = db["credits"]
+            
+            # Store order reference
+            credits_collection.insert_one({
+                "user_id": current_user["id"],
+                "razorpay_order_id": razorpay_order['id'],
+                "package": order.package,
+                "credits": package['credits'],
+                "status": "pending",
+                "created_at": datetime.utcnow()
+            })
+        
+        # Return order details to client
+        return {
+            "razorpay_key_id": RAZORPAY_KEY_ID,
+            "razorpay_order_id": razorpay_order['id'],
+            "amount": package['amount'],
+            "currency": package['currency'],
+            "description": package['description'],
+            "credits": package['credits']
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create order: {str(e)}"
+        )
 
-# Alternative implementation for Anthropic's Claude API
-def call_anthropic_api(prompt: str) -> str:
-    """
-    Call Anthropic's Claude API instead of OpenAI.
-    Uncomment and use this function if preferred.
-    """
-    # ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-    # if not ANTHROPIC_API_KEY:
-    #     return "I'm unable to analyze this position right now. Please check your API configuration."
-    # 
-    # try:
-    #     headers = {
-    #         "Content-Type": "application/json",
-    #         "x-api-key": ANTHROPIC_API_KEY,
-    #         "anthropic-version": "2023-06-01"
-    #     }
-    #     
-    #     payload = {
-    #         "model": "claude-3-opus-20240229",
-    #         "max_tokens": 1000,
-    #         "messages": [
-    #             {"role": "user", "content": prompt}
-    #         ]
-    #     }
-    #     
-    #     response = requests.post(
-    #         "https://api.anthropic.com/v1/messages",
-    #         headers=headers,
-    #         data=json.dumps(payload)
-    #     )
-    #     
-    #     if response.status_code == 200:
-    #         return response.json()["content"][0]["text"]
-    #     else:
-    #         print(f"API Error: {response.status_code} - {response.text}")
-    #         return "Sorry, I encountered an error while analyzing. Please try again."
-    # 
-    # except Exception as e:
-    #     print(f"Error calling Claude API: {str(e)}")
-    #     return "I'm having trouble connecting to my analysis engine. Please try again later."
+@app.post("/credits/verify-payment")
+async def verify_credit_payment(
+    payment: PaymentVerification,
+    current_user = Depends(get_current_user)
+):
+    """Verify the Razorpay payment for credits and add credits to user account"""
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required"
+        )
+        
+    # Verify the payment signature
+    if not verify_razorpay_signature(
+        payment.razorpay_order_id, 
+        payment.razorpay_payment_id, 
+        payment.razorpay_signature
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid payment signature"
+        )
+    
+    try:
+        # Fetch payment details from Razorpay
+        payment_details = client.payment.fetch(payment.razorpay_payment_id)
+        
+        # Verify payment is successful
+        if payment_details['status'] != 'captured':
+            raise HTTPException(
+                status_code=400,
+                detail="Payment not captured"
+            )
+        
+        # Fetch order details
+        order_details = client.order.fetch(payment.razorpay_order_id)
+        
+        # Get order details from notes
+        order_user_id = order_details['notes']['user_id']
+        order_type = order_details['notes'].get('type')
+        
+        # Only process if it's a credits order
+        if order_type != 'credits':
+            raise HTTPException(
+                status_code=400,
+                detail="Not a credits order"
+            )
+        
+        # Verify user_id matches current user
+        if order_user_id != current_user["id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="User ID mismatch"
+            )
+        
+        # Get credits from order
+        credits_to_add = int(order_details['notes']['credits'])
+        
+        # Update credits in database
+        if MONGODB_ENABLED:
+            # Get credits collection
+            credits_collection = db["credits"]
+            
+            # Update order status
+            credits_collection.update_one(
+                {"razorpay_order_id": payment.razorpay_order_id},
+                {
+                    "$set": {
+                        "status": "completed",
+                        "razorpay_payment_id": payment.razorpay_payment_id,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            
+            # Get user's current credits
+            user_credits = credits_collection.find_one(
+                {"user_id": current_user["id"], "type": "balance"}
+            )
+            
+            if user_credits:
+                # Update existing balance
+                new_balance = user_credits.get("balance", 0) + credits_to_add
+                credits_collection.update_one(
+                    {"user_id": current_user["id"], "type": "balance"},
+                    {
+                        "$set": {
+                            "balance": new_balance,
+                            "updated_at": datetime.utcnow()
+                        }
+                    }
+                )
+            else:
+                # Create new balance record
+                credits_collection.insert_one({
+                    "user_id": current_user["id"],
+                    "type": "balance",
+                    "balance": credits_to_add,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                })
+            
+            # Get updated balance
+            updated_credits = credits_collection.find_one(
+                {"user_id": current_user["id"], "type": "balance"}
+            )
+            current_balance = updated_credits.get("balance", credits_to_add)
+        else:
+            # Simple in-memory implementation
+            if "credits" not in globals():
+                globals()["credits"] = {}
+            
+            if current_user["id"] not in globals()["credits"]:
+                globals()["credits"][current_user["id"]] = credits_to_add
+            else:
+                globals()["credits"][current_user["id"]] += credits_to_add
+            
+            current_balance = globals()["credits"][current_user["id"]]
+        
+        return {
+            "success": True,
+            "credits_added": credits_to_add,
+            "current_balance": current_balance
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process credit payment: {str(e)}"
+        )
+
+@app.get("/credits/balance")
+async def get_credit_balance(current_user = Depends(get_current_user)):
+    """Get the current user's credit balance"""
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required"
+        )
+    
+    try:
+        if MONGODB_ENABLED:
+            # Get credits collection
+            if 'credits' not in db.list_collection_names():
+                # No credits collection yet, return 0
+                return {"balance": 0}
+            
+            credits_collection = db["credits"]
+            
+            # Get user's current balance
+            user_credits = credits_collection.find_one(
+                {"user_id": current_user["id"], "type": "balance"}
+            )
+            
+            if user_credits:
+                return {"balance": user_credits.get("balance", 0)}
+            else:
+                return {"balance": 0}
+        else:
+            # Simple in-memory implementation
+            if "credits" not in globals():
+                globals()["credits"] = {}
+            
+            return {"balance": globals()["credits"].get(current_user["id"], 0)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch credit balance: {str(e)}"
+        )
+
+@app.post("/credits/use")
+async def use_credits(
+    request: Dict[str, int],
+    current_user = Depends(get_current_user)
+):
+    """Use credits for analysis"""
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required"
+        )
+    
+    # Get amount to use
+    amount = request.get("amount", 1)
+    if amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid credit amount"
+        )
+    
+    try:
+        if MONGODB_ENABLED:
+            # Get credits collection
+            if 'credits' not in db.list_collection_names():
+                # No credits collection yet
+                raise HTTPException(
+                    status_code=400,
+                    detail="Insufficient credits"
+                )
+            
+            credits_collection = db["credits"]
+            
+            # Get user's current balance
+            user_credits = credits_collection.find_one(
+                {"user_id": current_user["id"], "type": "balance"}
+            )
+            
+            if not user_credits or user_credits.get("balance", 0) < amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Insufficient credits"
+                )
+            
+            # Update balance
+            new_balance = user_credits["balance"] - amount
+            credits_collection.update_one(
+                {"user_id": current_user["id"], "type": "balance"},
+                {
+                    "$set": {
+                        "balance": new_balance,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            
+            # Log usage
+            credits_collection.insert_one({
+                "user_id": current_user["id"],
+                "type": "usage",
+                "amount": amount,
+                "created_at": datetime.utcnow()
+            })
+            
+            return {
+                "success": True,
+                "credits_used": amount,
+                "current_balance": new_balance
+            }
+        else:
+            # Simple in-memory implementation
+            if "credits" not in globals():
+                globals()["credits"] = {}
+            
+            if current_user["id"] not in globals()["credits"] or globals()["credits"][current_user["id"]] < amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Insufficient credits"
+                )
+            
+            globals()["credits"][current_user["id"]] -= amount
+            
+            return {
+                "success": True,
+                "credits_used": amount,
+                "current_balance": globals()["credits"][current_user["id"]]
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to use credits: {str(e)}"
+        )
 
 # Additional endpoints for chess utilities
 

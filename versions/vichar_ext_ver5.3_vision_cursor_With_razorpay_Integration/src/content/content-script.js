@@ -165,13 +165,21 @@ async function initializeSidebar() {
   const userSection = document.createElement('div');
   userSection.style.cssText = `
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    gap: 10px;
     padding: 10px 15px;
     background-color: #e8f0fe;
     border-radius: 8px;
     margin-bottom: 15px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  `;
+  
+  // User info row (welcome message and logout)
+  const userInfoRow = document.createElement('div');
+  userInfoRow.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   `;
   
   // Get user name from storage
@@ -218,8 +226,56 @@ async function initializeSidebar() {
   });
   logoutButton.addEventListener('click', handleLogout);
   
-  userSection.appendChild(welcomeMessage);
-  userSection.appendChild(logoutButton);
+  userInfoRow.appendChild(welcomeMessage);
+  userInfoRow.appendChild(logoutButton);
+  
+  // Credits section
+  const creditsSection = document.createElement('div');
+  creditsSection.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 8px;
+    border-top: 1px solid #cce4ff;
+  `;
+  
+  // Credits display
+  const creditsDisplay = document.createElement('div');
+  creditsDisplay.id = 'sidebar-credits-display';
+  creditsDisplay.style.cssText = `
+    font-size: 14px;
+    color: #333;
+  `;
+  creditsDisplay.innerHTML = `<span style="font-weight: 600;">Credits: </span><span id="credits-value" style="font-weight: 700; color: #34a853;">Loading...</span>`;
+  
+  // Buy credits button
+  const buyCreditsButton = document.createElement('button');
+  buyCreditsButton.textContent = 'Buy Credits';
+  buyCreditsButton.style.cssText = `
+    padding: 5px 10px;
+    background-color: #34a853;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background-color 0.2s;
+  `;
+  buyCreditsButton.addEventListener('mouseenter', () => {
+    buyCreditsButton.style.backgroundColor = '#2d9249';
+  });
+  buyCreditsButton.addEventListener('mouseleave', () => {
+    buyCreditsButton.style.backgroundColor = '#34a853';
+  });
+  buyCreditsButton.addEventListener('click', showCreditPurchaseOptions);
+  
+  creditsSection.appendChild(creditsDisplay);
+  creditsSection.appendChild(buyCreditsButton);
+  
+  // Add the user info row and credits section to user section
+  userSection.appendChild(userInfoRow);
+  userSection.appendChild(creditsSection);
   
   // Question input - MOVED TO TOP
   const questionContainer = document.createElement('div');
@@ -524,6 +580,9 @@ async function initializeSidebar() {
   
   sidebarInitialized = true;
   console.log("Sidebar elements created successfully");
+  
+  // Fetch user credits
+  fetchUserCredits();
 }
 
 // Function to toggle sidebar visibility
@@ -567,6 +626,480 @@ function handleLogout() {
     
     // Show a notification that user has been logged out
     alert("You have been logged out successfully");
+  });
+}
+
+// Function to fetch and display user credits
+function fetchUserCredits() {
+  console.log("Fetching user credits");
+  const creditsValueElement = document.getElementById('credits-value');
+  
+  if (!creditsValueElement) {
+    console.error("Credits value element not found");
+    return;
+  }
+  
+  const token = localStorage.getItem('auth_token');
+  if (!token) {
+    console.error("No auth token found, cannot fetch credits");
+    creditsValueElement.textContent = "Login required";
+    return;
+  }
+  
+  // First try getting from local storage cache to display immediately
+  const cachedCredits = localStorage.getItem('user_credits');
+  if (cachedCredits) {
+    creditsValueElement.textContent = cachedCredits;
+  }
+  
+  // Then fetch from server to get updated count
+  fetch(`${API_URL}/subscription/status`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`Failed to fetch credits: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    console.log("Credits data received:", data);
+    
+    // For the demo, use 1000 credits if it's a premium account, or 10 if free
+    const credits = data.status === "premium" ? 1000 : 10;
+    
+    // Update the credits display
+    creditsValueElement.textContent = credits;
+    
+    // Cache the credits in localStorage
+    localStorage.setItem('user_credits', credits);
+  })
+  .catch(error => {
+    console.error("Error fetching credits:", error);
+    creditsValueElement.textContent = "Error";
+    
+    // If fetch fails, try with XMLHttpRequest
+    fetchCreditsWithXHR();
+  });
+}
+
+// Function to fetch credits using XMLHttpRequest as fallback
+function fetchCreditsWithXHR() {
+  console.log("Fetching credits with XMLHttpRequest");
+  const creditsValueElement = document.getElementById('credits-value');
+  
+  const token = localStorage.getItem('auth_token');
+  if (!token) {
+    console.error("No auth token found, cannot fetch credits");
+    return;
+  }
+  
+  const xhr = new XMLHttpRequest();
+  xhr.open('GET', `${API_URL}/subscription/status`, true);
+  xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState === 4) {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          console.log("Credits data received via XHR:", data);
+          
+          // For the demo, use 1000 credits if it's a premium account, or 10 if free
+          const credits = data.status === "premium" ? 1000 : 10;
+          
+          // Update the credits display
+          creditsValueElement.textContent = credits;
+          
+          // Cache the credits in localStorage
+          localStorage.setItem('user_credits', credits);
+        } catch (e) {
+          console.error("Failed to parse credits response:", e);
+          creditsValueElement.textContent = "Error";
+        }
+      } else {
+        console.error("XHR error fetching credits:", xhr.status, xhr.statusText);
+        creditsValueElement.textContent = "Error";
+      }
+    }
+  };
+  
+  xhr.onerror = function() {
+    console.error("Network error in XHR credits fetch");
+    creditsValueElement.textContent = "Network Error";
+  };
+  
+  xhr.send();
+}
+
+// Function to show credit purchase options
+function showCreditPurchaseOptions() {
+  console.log("Showing credit purchase options");
+  
+  // Create modal overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'credits-modal-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 10001;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  `;
+  
+  // Create modal content
+  const modal = document.createElement('div');
+  modal.id = 'credits-modal';
+  modal.style.cssText = `
+    background-color: white;
+    width: 400px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    padding: 20px;
+    position: relative;
+    max-height: 90vh;
+    overflow-y: auto;
+  `;
+  
+  // Modal header
+  const modalHeader = document.createElement('div');
+  modalHeader.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+  `;
+  
+  const modalTitle = document.createElement('h3');
+  modalTitle.textContent = 'Buy Analysis Credits';
+  modalTitle.style.cssText = `
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+  `;
+  
+  const closeButton = document.createElement('button');
+  closeButton.textContent = '×';
+  closeButton.style.cssText = `
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #999;
+  `;
+  closeButton.addEventListener('click', () => {
+    document.body.removeChild(overlay);
+  });
+  
+  modalHeader.appendChild(modalTitle);
+  modalHeader.appendChild(closeButton);
+  
+  // Credit packages
+  const packagesContainer = document.createElement('div');
+  packagesContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+  `;
+  
+  // Define credit packages
+  const packages = [
+    { id: 'basic', name: 'Basic', credits: 1000, price: 1.00 },
+    { id: 'standard', name: 'Standard', credits: 5000, price: 4.50 },
+    { id: 'premium', name: 'Premium', credits: 12000, price: 10.00 }
+  ];
+  
+  // Create package options
+  packages.forEach(pkg => {
+    const packageOption = document.createElement('div');
+    packageOption.className = 'credit-package-option';
+    packageOption.style.cssText = `
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 15px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    `;
+    
+    packageOption.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-weight: 600; font-size: 16px; color: #333;">${pkg.name} Package</div>
+          <div style="color: #666; margin-top: 5px;">${pkg.credits.toLocaleString()} credits</div>
+        </div>
+        <div style="font-weight: 700; font-size: 18px; color: #34a853;">$${pkg.price.toFixed(2)}</div>
+      </div>
+    `;
+    
+    // Add hover effect
+    packageOption.addEventListener('mouseenter', () => {
+      packageOption.style.borderColor = '#34a853';
+      packageOption.style.backgroundColor = '#f0f9f4';
+    });
+    
+    packageOption.addEventListener('mouseleave', () => {
+      packageOption.style.borderColor = '#ddd';
+      packageOption.style.backgroundColor = 'white';
+    });
+    
+    // Add click handler to initiate payment
+    packageOption.addEventListener('click', () => {
+      initiateRazorpayPayment(pkg);
+    });
+    
+    packagesContainer.appendChild(packageOption);
+  });
+  
+  // Information text
+  const infoText = document.createElement('div');
+  infoText.style.cssText = `
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 20px;
+    line-height: 1.5;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+  `;
+  infoText.innerHTML = `
+    <p style="margin: 0 0 10px 0;">1,000 credits = 1,000 API calls to analyze chess positions</p>
+    <p style="margin: 0;">Payments are processed securely via Razorpay.</p>
+  `;
+  
+  // Assemble modal
+  modal.appendChild(modalHeader);
+  modal.appendChild(infoText);
+  modal.appendChild(packagesContainer);
+  
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+// Function to initiate Razorpay payment
+function initiateRazorpayPayment(packageInfo) {
+  console.log("Initiating payment for package:", packageInfo);
+  
+  const token = localStorage.getItem('auth_token');
+  if (!token) {
+    alert("You must be logged in to make a purchase");
+    return;
+  }
+  
+  // Show loading state
+  const overlay = document.getElementById('credits-modal-overlay');
+  if (overlay) {
+    overlay.innerHTML = `
+      <div style="background-color: white; padding: 40px; border-radius: 8px; text-align: center;">
+        <div style="display: inline-block; border-radius: 50%; border: 3px solid #4285f4; 
+             border-top-color: transparent; width: 30px; height: 30px; animation: spin 1s linear infinite;"></div>
+        <div style="margin-top: 20px; font-weight: 500; color: #333;">Processing payment...</div>
+      </div>
+      <style>
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      </style>
+    `;
+  }
+  
+  // Start by creating an order
+  fetch(`${API_URL}/credits/create-order`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      package: packageInfo.id
+    })
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`Failed to create order: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  })
+  .then(orderData => {
+    console.log("Order created:", orderData);
+    console.log("Order data detail - key_id:", orderData.razorpay_key_id);
+    console.log("Order data detail - order_id:", orderData.razorpay_order_id);
+    console.log("Order data detail - amount:", orderData.amount);
+    console.log("Order data detail - currency:", orderData.currency);
+    
+    // Instead of trying to load Razorpay directly, open a payment popup
+    chrome.runtime.sendMessage({
+      action: "openPaymentPopup",
+      orderData: orderData,
+      packageInfo: packageInfo,
+      userName: localStorage.getItem('user_name') || '',
+      userEmail: localStorage.getItem('user_email') || '',
+      token: token
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Error opening payment popup:", chrome.runtime.lastError);
+        alert("Could not open payment window. Please try again later.");
+        
+        // Remove the overlay
+        const overlay = document.getElementById('credits-modal-overlay');
+        if (overlay) {
+          document.body.removeChild(overlay);
+        }
+        return;
+      }
+      
+      // The popup will handle the payment flow from here
+      console.log("Payment popup opened", response);
+      
+      // Keep the overlay until we get a payment result
+      // The payment result will come through a message listener
+    });
+  })
+  .catch(error => {
+    console.error("Error creating order:", error);
+    alert(`Failed to initialize payment: ${error.message}`);
+    
+    // Remove the overlay
+    const overlay = document.getElementById('credits-modal-overlay');
+    if (overlay) {
+      document.body.removeChild(overlay);
+    }
+  });
+}
+
+// Function to verify payment with the server
+function verifyPayment(paymentResponse, packageInfo) {
+  console.log("Verifying payment:", paymentResponse);
+  
+  const token = localStorage.getItem('auth_token');
+  if (!token) {
+    alert("Authentication error. Please log in again.");
+    return;
+  }
+  
+  // Show verification status
+  const overlay = document.getElementById('credits-modal-overlay');
+  if (overlay) {
+    overlay.innerHTML = `
+      <div style="background-color: white; padding: 40px; border-radius: 8px; text-align: center;">
+        <div style="display: inline-block; border-radius: 50%; border: 3px solid #4285f4; 
+             border-top-color: transparent; width: 30px; height: 30px; animation: spin 1s linear infinite;"></div>
+        <div style="margin-top: 20px; font-weight: 500; color: #333;">Verifying payment...</div>
+      </div>
+    `;
+  }
+  
+  // Verify the payment with the server
+  fetch(`${API_URL}/credits/verify-payment`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      razorpay_payment_id: paymentResponse.razorpay_payment_id,
+      razorpay_order_id: paymentResponse.razorpay_order_id,
+      razorpay_signature: paymentResponse.razorpay_signature
+    })
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`Payment verification failed: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    console.log("Payment verified:", data);
+    
+    // Show success message
+    if (overlay) {
+      overlay.innerHTML = `
+        <div style="background-color: white; padding: 40px; border-radius: 8px; text-align: center;">
+          <div style="width: 60px; height: 60px; background-color: #34a853; border-radius: 50%; 
+               display: flex; align-items: center; justify-content: center; margin: 0 auto 20px auto;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" 
+                 stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+          <div style="font-size: 20px; font-weight: 600; color: #333; margin-bottom: 10px;">Payment Successful!</div>
+          <div style="font-size: 16px; color: #666; margin-bottom: 20px;">${packageInfo.credits.toLocaleString()} credits have been added to your account.</div>
+          <button id="close-success-btn" style="padding: 10px 20px; background-color: #4285f4; color: white; 
+                 border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500;">Close</button>
+        </div>
+      `;
+      
+      // Add event listener to close button
+      setTimeout(() => {
+        const closeBtn = document.getElementById('close-success-btn');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            
+            // Update credits display
+            fetchUserCredits();
+          });
+        }
+      }, 0);
+    }
+    
+    // Update credits in localStorage
+    const currentCredits = parseInt(localStorage.getItem('user_credits') || '0');
+    localStorage.setItem('user_credits', (currentCredits + packageInfo.credits).toString());
+    
+    // Update credits display
+    const creditsValueElement = document.getElementById('credits-value');
+    if (creditsValueElement) {
+      creditsValueElement.textContent = (currentCredits + packageInfo.credits).toString();
+    }
+  })
+  .catch(error => {
+    console.error("Payment verification error:", error);
+    
+    // Show error message
+    if (overlay) {
+      overlay.innerHTML = `
+        <div style="background-color: white; padding: 40px; border-radius: 8px; text-align: center;">
+          <div style="width: 60px; height: 60px; background-color: #ea4335; border-radius: 50%; 
+               display: flex; align-items: center; justify-content: center; margin: 0 auto 20px auto;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" 
+                 stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </div>
+          <div style="font-size: 20px; font-weight: 600; color: #333; margin-bottom: 10px;">Payment Failed</div>
+          <div style="font-size: 16px; color: #666; margin-bottom: 20px;">${error.message}</div>
+          <button id="close-error-btn" style="padding: 10px 20px; background-color: #4285f4; color: white; 
+                 border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500;">Close</button>
+        </div>
+      `;
+      
+      // Add event listener to close button
+      setTimeout(() => {
+        const closeBtn = document.getElementById('close-error-btn');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+          });
+        }
+      }, 0);
+    }
   });
 }
 
@@ -648,6 +1181,32 @@ function askQuestion() {
     return;
   }
   
+  // Check if user has credits
+  const creditsStr = localStorage.getItem('user_credits');
+  const credits = creditsStr ? parseInt(creditsStr) : 0;
+  
+  if (credits <= 0) {
+    responseArea.innerHTML = `
+      <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px; margin-bottom: 15px;">
+        <strong>Out of credits!</strong> Please purchase more credits to continue analyzing positions.
+      </div>
+      <button id="buy-credits-now" style="padding: 10px 16px; background-color: #34a853; color: white;
+         border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500;">
+        Buy Credits Now
+      </button>
+    `;
+    
+    // Add event listener to the buy credits button
+    setTimeout(() => {
+      const buyCreditsNowButton = document.getElementById('buy-credits-now');
+      if (buyCreditsNowButton) {
+        buyCreditsNowButton.addEventListener('click', showCreditPurchaseOptions);
+      }
+    }, 0);
+    
+    return;
+  }
+  
   // Show loading indicator
   responseArea.innerHTML = `
     <div style="display: flex; align-items: center; justify-content: center; height: 100px;">
@@ -695,9 +1254,32 @@ function askQuestion() {
         }
         
         if (response && response.success) {
+          // Decrement credits
+          const newCredits = credits - 1;
+          localStorage.setItem('user_credits', newCredits.toString());
+          
+          // Update credits display
+          const creditsValueElement = document.getElementById('credits-value');
+          if (creditsValueElement) {
+            creditsValueElement.textContent = newCredits.toString();
+          }
+          
           // Format the response with better styling
           const formattedResponse = formatAPIResponse(response.data);
           responseArea.innerHTML = formattedResponse;
+          
+          // Add a small indicator that credits were used
+          const creditFooter = document.createElement('div');
+          creditFooter.style.cssText = `
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+            text-align: right;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+          `;
+          creditFooter.textContent = `1 credit used. ${newCredits} credits remaining.`;
+          responseArea.appendChild(creditFooter);
         } else {
           responseArea.innerHTML = `
             <div style="color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 4px;">
@@ -888,7 +1470,7 @@ function callAnalysisAPIWithXHR(question, capturedBoard, imageData = null) {
         reject(new Error("Network error occurred. Please check your internet connection and ensure the API server is accessible."));
       };
       
-      xhr.timeout = 60000; // 60 seconds timeout
+      xhr.timeout = 60000;
       xhr.ontimeout = function() {
         console.error("XHR Request timed out");
         reject(new Error("Request timed out. The server might be overloaded or unreachable."));
@@ -1070,6 +1652,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     return true; // Keep the message channel open
   }
+  
+  if (request.action === "paymentCompleted") {
+    console.log("Payment completed message received", request);
+    
+    // Remove the overlay
+    const overlay = document.getElementById('credits-modal-overlay');
+    if (overlay) {
+      document.body.removeChild(overlay);
+    }
+    
+    if (request.success) {
+      // Show success message
+      alert(`Payment successful! ${request.creditsAdded} credits have been added to your account.`);
+      
+      // Update credits in localStorage
+      const currentCredits = parseInt(localStorage.getItem('user_credits') || '0');
+      localStorage.setItem('user_credits', (currentCredits + request.creditsAdded).toString());
+      
+      // Update credits display
+      const creditsValueElement = document.getElementById('credits-value');
+      if (creditsValueElement) {
+        creditsValueElement.textContent = (currentCredits + request.creditsAdded).toString();
+      }
+    } else {
+      // Show error message
+      alert(`Payment failed: ${request.error || "Unknown error"}`);
+    }
+  }
+  
+  // Keep existing listeners running
+  return true;
 });
 
 // Initialize the sidebar when the content script loads
@@ -1082,6 +1695,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isLoggedIn) {
       console.log("User is logged in, initializing sidebar");
       initializeSidebar(); // async function, no need to await here
+      
+      // Load Razorpay script for payment processing
+      loadRazorpayScript();
     } else {
       console.log("User is not logged in, sidebar will not be initialized");
     }
@@ -1097,10 +1713,29 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     if (isLoggedIn) {
       console.log("User is logged in, initializing sidebar immediately");
       initializeSidebar(); // async function, no need to await here
+      
+      // Load Razorpay script for payment processing
+      loadRazorpayScript();
     } else {
       console.log("User is not logged in, sidebar will not be initialized");
     }
   });
+}
+
+// Function to load the Razorpay script
+function loadRazorpayScript() {
+  if (window.Razorpay) {
+    console.log("Razorpay script already loaded");
+    return;
+  }
+  
+  console.log("Loading Razorpay script");
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.async = true;
+  script.onload = () => console.log("Razorpay script loaded successfully");
+  script.onerror = (error) => console.error("Failed to load Razorpay script:", error);
+  document.head.appendChild(script);
 }
 
 // Add this code to the bottom of your content-script.js for a one-time test
@@ -1174,7 +1809,7 @@ function testAPIDirectly() {
             console.log("%c❌ XHR TEST FAILED (Parse error)", "color: red; font-weight: bold;");
           }
         } else {
-          console.error("XHR test - Failed:", xhr.status, xhr.statusText, xhr.responseText);
+          console.error("XHR test - Failed:", xhr.status, xhr.statusText);
           console.log("%c❌ XHR TEST FAILED", "color: red; font-weight: bold;");
         }
       }
@@ -1182,7 +1817,7 @@ function testAPIDirectly() {
     
     xhr.onerror = function() {
       console.error("XHR test - Network error");
-      console.log("%c❌ XHR TEST FAILED (Network error)", "color: red; font-weight: bold;");
+      console.log("%c❌ XHR TEST FAILED", "color: red; font-weight: bold;");
       
       // Provide troubleshooting guidance
       console.log("%c🔍 TROUBLESHOOTING SUGGESTIONS:", "color: blue; font-weight: bold;");

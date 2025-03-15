@@ -1,6 +1,9 @@
 // Import the script injector functionality
 import { injectCaptureScript } from './scriptInjector.js';
 
+// API configuration
+const API_URL = "https://api.beekayprecision.com";
+
 // Initialize the background script
 console.log("Background script initialized");
 
@@ -227,7 +230,196 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     return true; // Indicates we'll send a response asynchronously
   }
+  
+  // Handle loading Razorpay checkout in a way that bypasses CSP restrictions
+  if (request.action === "loadRazorpayCheckout") {
+    console.log("Loading Razorpay checkout from background script");
+    
+    (async () => {
+      try {
+        // Get the current active tab
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (tabs.length === 0) {
+          sendResponse({ success: false, error: "No active tab found" });
+          return;
+        }
+        
+        const tabId = tabs[0].id;
+        const options = request.options;
+        
+        // Inject a script to create Razorpay checkout
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: injectRazorpayCheckout,
+          args: [options]
+        });
+        
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error("Error loading Razorpay:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    
+    return true; // Indicates we'll send a response asynchronously
+  }
+  
+  // Handle opening a payment popup window
+  if (request.action === "openPaymentPopup") {
+    console.log("Opening payment popup window");
+    
+    (async () => {
+      try {
+        // Create a popup window
+        const popup = await chrome.windows.create({
+          url: chrome.runtime.getURL('src/payment/payment.html'),
+          type: 'popup',
+          width: 500,
+          height: 600
+        });
+        
+        // Format the payment data in a way our updated payment.js expects
+        const paymentData = {
+          key_id: request.orderData.razorpay_key_id,
+          order_id: request.orderData.razorpay_order_id,
+          amount: request.orderData.amount,
+          currency: request.orderData.currency,
+          description: request.orderData.description,
+          packageName: request.packageInfo.name,
+          credits: request.packageInfo.credits,
+          apiUrl: API_URL,
+          token: request.token,
+          user_name: request.userName,
+          user_email: request.userEmail || ''
+        };
+        
+        // Store the payment data for the popup to access
+        chrome.storage.local.set({
+          'paymentData': paymentData
+        });
+        
+        console.log("Payment popup created with ID:", popup.id);
+        sendResponse({ success: true, popupId: popup.id });
+      } catch (error) {
+        console.error("Error creating payment popup:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    
+    return true; // Indicates we'll send a response asynchronously
+  }
+  
+  // Handle payment verification from the popup
+  if (request.action === "verifyPayment") {
+    console.log("Processing payment verification from popup");
+    
+    (async () => {
+      try {
+        // Get the authentication token
+        const storageData = await chrome.storage.local.get(['auth_token', 'payment_data']);
+        const token = storageData.auth_token;
+        const paymentData = storageData.payment_data;
+        
+        if (!token) {
+          throw new Error("Authentication required");
+        }
+        
+        // Verify the payment with the server
+        const response = await fetch(`${API_URL}/credits/verify-payment`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            razorpay_payment_id: request.paymentResponse.razorpay_payment_id,
+            razorpay_order_id: request.paymentResponse.razorpay_order_id,
+            razorpay_signature: request.paymentResponse.razorpay_signature
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Payment verification failed: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log("Payment verified:", data);
+        
+        // Find the current active tab to send the success message
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (tabs.length > 0) {
+          // Notify the content script about the successful payment
+          chrome.tabs.sendMessage(tabs[0].id, {
+            action: "paymentCompleted",
+            success: true,
+            creditsAdded: paymentData.packageInfo.credits,
+            currentBalance: data.current_balance
+          });
+        }
+        
+        // Send success response to the popup
+        sendResponse({ success: true, data });
+        
+        // Close the popup after a delay
+        setTimeout(() => {
+          if (request.popupId) {
+            chrome.windows.remove(request.popupId);
+          }
+        }, 3000);
+        
+      } catch (error) {
+        console.error("Payment verification error:", error);
+        
+        // Find the current active tab to send the error message
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (tabs.length > 0) {
+          // Notify the content script about the failed payment
+          chrome.tabs.sendMessage(tabs[0].id, {
+            action: "paymentCompleted",
+            success: false,
+            error: error.message
+          });
+        }
+        
+        // Send error response to the popup
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    
+    return true; // Indicates we'll send a response asynchronously
+  }
 });
+
+// Function to be injected into the page to create Razorpay checkout
+function injectRazorpayCheckout(options) {
+  // Create script element and add it to the page
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  
+  script.onload = function() {
+    // Create and open Razorpay checkout
+    const rzp = new window.Razorpay(options);
+    rzp.open();
+  };
+  
+  script.onerror = function() {
+    alert("Could not load payment gateway. Please try again later.");
+    
+    // Remove overlay if it exists
+    const overlay = document.getElementById('credits-modal-overlay');
+    if (overlay) {
+      document.body.removeChild(overlay);
+    }
+  };
+  
+  document.head.appendChild(script);
+  
+  return true;
+}
 
 // Process the captured chessboard image
 async function processChessboardImage(captureResult) {

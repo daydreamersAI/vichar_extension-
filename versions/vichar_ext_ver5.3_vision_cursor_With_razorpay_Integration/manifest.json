@@ -50,12 +50,14 @@
         "src/analysis/analysis.html",
         "src/content/sidebar.js",
         "src/content/*.js",
+        "src/payment/payment.html",
+        "src/payment/*.js",
         "lib/*.js"
       ],
       "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://checkout.razorpay.com"
   }
 }
