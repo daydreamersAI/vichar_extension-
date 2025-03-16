@@ -1178,20 +1178,74 @@ function captureChessBoard() {
           overflow: visible !important;
           background-color: #d9d9d9 !important;
           font-family: system-ui, -apple-system, sans-serif !important;
+          padding: 20px !important; /* Add padding for coordinates */
         `;
         
-        // Create the board background
+        // Create the board background with proper chess squares
         const boardBackground = document.createElement('div');
         boardBackground.className = 'board-background';
         boardBackground.style.cssText = `
-          width: 100% !important;
-          height: 100% !important;
+          width: 560px !important;
+          height: 560px !important;
           position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxkZWZzPjxwYXR0ZXJuIGlkPSJjaGVja2VyIiBwYXR0ZXJuVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB3aWR0aD0iMjUlIiBoZWlnaHQ9IjI1JSI+PHJlY3QgZmlsbD0iI2Q5ZDlkOSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjxyZWN0IGZpbGw9IiNiYmJiYmIiIHdpZHRoPSIxMi41JSIgaGVpZ2h0PSIxMi41JSIvPjxyZWN0IGZpbGw9IiNiYmJiYmIiIHdpZHRoPSIxMi41JSIgaGVpZ2h0PSIxMi41JSIgeD0iMTIuNSUiIHk9IjEyLjUlIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2NoZWNrZXIpIi8+PC9zdmc+') !important;
-          background-size: 100% 100% !important;
+          top: 20px !important;
+          left: 20px !important;
+          display: grid !important;
+          grid-template-columns: repeat(8, 1fr) !important;
+          grid-template-rows: repeat(8, 1fr) !important;
         `;
+        
+        // Create the 64 squares with alternating colors
+        for (let rank = 0; rank < 8; rank++) {
+          for (let file = 0; file < 8; file++) {
+            const square = document.createElement('div');
+            const isLightSquare = (rank + file) % 2 === 0;
+            square.style.cssText = `
+              width: 100% !important;
+              height: 100% !important;
+              background-color: ${isLightSquare ? '#f0d9b5' : '#b58863'} !important;
+              position: relative !important;
+            `;
+            boardBackground.appendChild(square);
+          }
+        }
+        
+        // Add coordinates (a-h, 1-8)
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+        
+        // Add file coordinates (a-h)
+        for (let i = 0; i < 8; i++) {
+          const fileCoord = document.createElement('div');
+          fileCoord.textContent = files[i];
+          fileCoord.style.cssText = `
+            position: absolute !important;
+            bottom: 2px !important;
+            left: ${20 + (i * 70) + 30}px !important;
+            font-size: 12px !important;
+            color: #888 !important;
+            text-align: center !important;
+            font-family: system-ui, -apple-system, sans-serif !important;
+          `;
+          freshBoard.appendChild(fileCoord);
+        }
+        
+        // Add rank coordinates (1-8)
+        for (let i = 0; i < 8; i++) {
+          const rankCoord = document.createElement('div');
+          rankCoord.textContent = ranks[i];
+          rankCoord.style.cssText = `
+            position: absolute !important;
+            left: 5px !important;
+            top: ${20 + (i * 70) + 30}px !important;
+            font-size: 12px !important;
+            color: #888 !important;
+            text-align: center !important;
+            font-family: system-ui, -apple-system, sans-serif !important;
+          `;
+          freshBoard.appendChild(rankCoord);
+        }
+        
         freshBoard.appendChild(boardBackground);
         
         // Add the fresh board to the temporary container
@@ -1237,10 +1291,10 @@ function captureChessBoard() {
                   // Set piece style
                   piece.style.cssText = `
                     position: absolute !important;
-                    width: 12.5% !important;
-                    height: 12.5% !important;
-                    top: ${rank * 12.5}% !important;
-                    left: ${file * 12.5}% !important;
+                    width: 70px !important; 
+                    height: 70px !important;
+                    top: ${20 + (rank * 70)}px !important;
+                    left: ${20 + (file * 70)}px !important;
                     background-size: contain !important;
                     background-position: center !important;
                     background-repeat: no-repeat !important;
@@ -1369,10 +1423,10 @@ function captureChessBoard() {
               // Set piece style
               piece.style.cssText = `
                 position: absolute !important;
-                width: 12.5% !important;
-                height: 12.5% !important;
-                top: ${rank * 12.5}% !important;
-                left: ${file * 12.5}% !important;
+                width: 70px !important; 
+                height: 70px !important;
+                top: ${20 + (rank * 70)}px !important;
+                left: ${20 + (file * 70)}px !important;
                 background-size: contain !important;
                 background-position: center !important;
                 background-repeat: no-repeat !important;
@@ -1431,14 +1485,17 @@ function captureChessBoard() {
             // Use html2canvas to capture the board
             const canvas = await html2canvas(tempContainer.firstChild, {
               backgroundColor: null,
-              scale: 1,
-              logging: true,
+              scale: 2, // Higher scale for better quality
+              logging: false,
               useCORS: true,
               allowTaint: true,
               width: 600,
               height: 600,
+              imageTimeout: 0, // No timeout for image loading
               onclone: (clonedDoc) => {
                 console.log("Document cloned for capture");
+                // Force a small delay to ensure everything is rendered
+                return new Promise(resolve => setTimeout(resolve, 100));
               }
             });
             
