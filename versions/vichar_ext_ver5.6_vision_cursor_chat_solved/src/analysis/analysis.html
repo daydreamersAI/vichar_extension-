@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Chess Position Analysis</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 20px auto; /* Added top/bottom margin */
+      padding: 20px;
+      color: #333;
+      line-height: 1.5;
+      background-color: #f8f9fa;
+      display: flex; /* Use flexbox for layout */
+      flex-direction: column; /* Stack elements vertically */
+      min-height: calc(100vh - 40px); /* Ensure body takes height */
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .container {
+      display: flex; /* Split into two columns */
+      gap: 24px;
+      flex-grow: 1; /* Allow container to grow */
+      min-height: 0; /* Necessary for flex-grow in column */
+    }
+
+    /* Left Column: Board and Info */
+    .left-column {
+      flex: 0 0 430px; /* Fixed width for board area */
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Right Column: Chat */
+    .right-column {
+      flex: 1; /* Takes remaining space */
+      display: flex;
+      flex-direction: column;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      overflow: hidden; /* Contain children */
+      min-height: 0; /* Necessary for flex-grow in column */
+    }
+
+    .board-container {
+      width: 400px; /* Fixed width */
+      height: 400px; /* Fixed height */
+      margin: 0 auto; /* Center within left column */
+      background-color: white;
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      flex-shrink: 0; /* Prevent shrinking */
+    }
+
+    .captured-image {
+      max-width: 100%;
+      height: auto; /* Maintain aspect ratio */
+      max-height: 370px; /* Fit within padding */
+      border-radius: 4px;
+      display: block;
+      margin: 0 auto;
+    }
+
+    .game-info {
+      background-color: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      flex-shrink: 0; /* Prevent shrinking */
+    }
+
+    /* Chat Area Styling */
+     .chat-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid #e0e0e0;
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
+        flex-shrink: 0;
+     }
+
+    .chat-messages {
+      flex-grow: 1; /* Takes up available space */
+      padding: 15px 20px;
+      overflow-y: auto; /* Make messages scrollable */
+      min-height: 300px; /* Give it minimum height */
+      background-color: #f9f9f9; /* Slightly different background */
+      display: flex;
+      flex-direction: column;
+      gap: 12px; /* Space between messages */
+    }
+
+    .chat-message {
+      padding: 10px 15px;
+      border-radius: 12px;
+      max-width: 85%; /* Prevent messages spanning full width */
+      word-wrap: break-word; /* Break long words */
+      line-height: 1.4;
+      font-size: 15px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .user-message {
+      background-color: #e1f5fe; /* Light blue for user */
+      color: #01579b;
+      align-self: flex-end; /* Align user messages to the right */
+      border-bottom-right-radius: 4px; /* Different corner radius */
+    }
+
+    .assistant-message {
+      background-color: #ffffff; /* White for assistant */
+      color: #333;
+      align-self: flex-start; /* Align assistant messages to the left */
+      border: 1px solid #eee;
+       border-bottom-left-radius: 4px; /* Different corner radius */
+    }
+
+    /* Add speaker labels (Optional) */
+    .chat-message::before {
+      display: block;
+      font-size: 0.8em;
+      font-weight: bold;
+      margin-bottom: 4px;
+      color: #555;
+    }
+    .user-message::before {
+      content: "You";
+      text-align: right; /* Align label right for user */
+    }
+    .assistant-message::before {
+      content: "Assistant";
+    }
+
+
+    /* Loading Indicator inside messages area */
+    .loading-indicator {
+       display: flex;
+       align-items: center;
+       justify-content: center;
+       padding: 15px;
+       color: #666;
+       font-style: italic;
+       align-self: center; /* Center loading indicator */
+       margin-top: 10px;
+    }
+     .loading-indicator::before {
+       content: ""; display: inline-block; width: 16px; height: 16px;
+       border-radius: 50%; border: 2px solid #ccc; border-top-color: #666;
+       animation: spin 1s linear infinite; margin-right: 8px;
+     }
+
+    .chat-input-area {
+      padding: 15px 20px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      gap: 10px;
+      align-items: center; /* Vertically align items */
+      flex-shrink: 0;
+    }
+
+    textarea#questionInput {
+      flex-grow: 1; /* Textarea takes most space */
+      height: 50px; /* Adjust initial height */
+      margin-bottom: 0; /* Remove bottom margin */
+      resize: none; /* Prevent manual resize */
+      overflow-y: auto; /* Allow scrolling if needed */
+      font-size: 14px;
+      padding: 10px 12px;
+    }
+
+    button#askButton {
+      padding: 10px 15px; /* Slightly smaller button */
+      font-size: 14px;
+      flex-shrink: 0; /* Prevent button shrinking */
+      height: 40px; /* Match textarea better */
+    }
+
+    h3 {
+      color: #000;
+      margin-top: 0;
+      margin-bottom: 15px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .fen-display, .pgn-display { /* Combined style */
+      font-family: 'Courier New', monospace;
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 13px; /* Slightly smaller */
+      word-break: break-all;
+      max-height: 100px; /* Limit height */
+      overflow-y: auto;
+    }
+
+    .info-label {
+      font-weight: 600;
+      margin-bottom: 5px;
+      color: #333;
+      font-size: 14px;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Styles for formatted response content */
+    .chess-notation { color: #1a73e8; font-weight: 500; }
+    .evaluation { color: #188038; font-weight: 500; }
+    .highlight { font-weight: 600; }
+
+    /* Error Message Styling */
+    .error-message {
+      background-color: #ffebee;
+      color: #c62828;
+      padding: 10px 15px;
+      border-radius: 4px;
+      border: 1px solid #ffcdd2;
+      margin-top: 10px; /* Add margin if needed */
+      align-self: center; /* Center error block */
+      max-width: 90%;
+      text-align: center;
+    }
+     .error-message strong {
+        display: block;
+        margin-bottom: 5px;
+     }
+
+  </style>
+</head>
+<body>
+  <h1>Chess Position Analysis</h1>
+
+  <div class="container">
+    <!-- Left Column: Board and Info -->
+    <div class="left-column">
+      <div class="board-container">
+        <img id="capturedBoard" class="captured-image" alt="Captured chess board">
+      </div>
+      <div class="game-info" id="gameInfo" style="display: none;">
+        <div class="info-label">Position (FEN):</div>
+        <div class="fen-display" id="fenDisplay"></div>
+        <div id="pgnContainer" style="display: none;">
+          <div class="info-label">Move History (PGN):</div>
+          <div class="pgn-display" id="pgnDisplay"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Chat -->
+    <div class="right-column">
+       <div class="chat-header">Analysis Chat</div>
+      <div class="chat-messages" id="chatMessages">
+        <!-- Chat messages will be rendered here by JavaScript -->
+        <p style="text-align: center; color: #666; margin-top: 20px;">
+            Ask a question below to start the analysis.
+        </p>
+      </div>
+      <div class="chat-input-area">
+        <textarea id="questionInput" placeholder="Ask about this position..."></textarea>
+        <button id="askButton">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="analysis.js"></script>
+</body>
+</html>
