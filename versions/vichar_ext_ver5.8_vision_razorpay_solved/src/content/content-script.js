@@ -539,6 +539,8 @@ function fetchUserCredits() {
   const token = localStorage.getItem('auth_token');
   if (!token) { creditsValueElement.textContent = "N/A"; console.log("No auth token found for credits."); return; }
 
+  console.log("Using token for credits fetch (length: " + token.length + ")");
+
   // Show cached value immediately if available, otherwise 'Loading...'
   const cachedCredits = localStorage.getItem('user_credits');
   creditsValueElement.textContent = cachedCredits || 'Loading...';
@@ -547,7 +549,7 @@ function fetchUserCredits() {
   fetch(`${API_URL}/credits/balance`, { 
     method: 'GET',
     headers: { 
-      'Authorization': `Bearer ${token}`, 
+      'Authorization': token, 
       'Content-Type': 'application/json'
     },
     mode: 'cors'
@@ -602,264 +604,74 @@ function updateCreditsDisplay(credits) {
 
 // Trigger opening the popup for credit purchase
 function showCreditPurchaseOptions() {
-     console.log("Buy Credits button clicked in sidebar");
-     
-     // Get token from localStorage
-     const token = localStorage.getItem('auth_token');
-     if (!token) {
-         alert("Please log in to purchase credits.");
-         return;
-     }
-     
-     // Show small notification in sidebar first
-     const creditsValueElement = document.getElementById('sidebar-credits-value');
-     if (creditsValueElement) {
-         creditsValueElement.textContent = "Loading...";
-     }
-     
-     // Open a separate window with package options
-     const packageWindow = window.open('', 'ChessAnalyzerPackages', 'width=500,height=650');
-     if (!packageWindow) {
-         alert("Pop-up blocked! Please allow pop-ups for this site to purchase credits.");
-         return;
-     }
-     
-     // Create simple package selection HTML
-     packageWindow.document.write(`
-         <!DOCTYPE html>
-         <html>
-         <head>
-             <meta charset="UTF-8">
-             <title>Chess Analyzer - Buy Credits</title>
-             <style>
-                 body {
-                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                     max-width: 500px;
-                     margin: 0 auto;
-                     padding: 20px;
-                     background-color: #f8f9fa;
-                 }
-                 h1 {
-                     text-align: center;
-                     color: #4285f4;
-                     margin-bottom: 30px;
-                 }
-                 .packages {
-                     display: flex;
-                     flex-direction: column;
-                     gap: 20px;
-                 }
-                 .package {
-                     background-color: white;
-                     border-radius: 8px;
-                     padding: 20px;
-                     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                     display: flex;
-                     flex-direction: column;
-                     gap: 10px;
-                     cursor: pointer;
-                     transition: transform 0.2s ease;
-                 }
-                 .package:hover {
-                     transform: translateY(-2px);
-                     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                 }
-                 .package-header {
-                     display: flex;
-                     justify-content: space-between;
-                     align-items: center;
-                 }
-                 .package-name {
-                     font-size: 18px;
-                     font-weight: 600;
-                     color: #202124;
-                 }
-                 .package-price {
-                     font-size: 18px;
-                     font-weight: 700;
-                     color: #34a853;
-                 }
-                 .package-credits {
-                     color: #5f6368;
-                 }
-                 .package-button {
-                     background-color: #4285f4;
-                     color: white;
-                     border: none;
-                     padding: 10px;
-                     border-radius: 4px;
-                     font-weight: 600;
-                     cursor: pointer;
-                     margin-top: 10px;
-                 }
-                 .package-button:hover {
-                     background-color: #3367d6;
-                 }
-                 .status {
-                     margin-top: 20px;
-                     padding: 10px;
-                     border-radius: 4px;
-                     display: none;
-                 }
-                 .error {
-                     background-color: #fce8e6;
-                     color: #c5221f;
-                     display: block;
-                 }
-             </style>
-         </head>
-         <body>
-             <h1>Buy Credits</h1>
-             <div class="packages">
-                 <div class="package" data-package-id="basic">
-                     <div class="package-header">
-                         <div class="package-name">Basic Pack</div>
-                         <div class="package-price">₹199</div>
-                     </div>
-                     <div class="package-credits">100 Credits</div>
-                     <button class="package-button">Buy Now</button>
-                 </div>
-                 <div class="package" data-package-id="standard">
-                     <div class="package-header">
-                         <div class="package-name">Standard Pack</div>
-                         <div class="package-price">₹499</div>
-                     </div>
-                     <div class="package-credits">300 Credits</div>
-                     <button class="package-button">Buy Now</button>
-                 </div>
-                 <div class="package" data-package-id="premium">
-                     <div class="package-header">
-                         <div class="package-name">Premium Pack</div>
-                         <div class="package-price">₹999</div>
-                     </div>
-                     <div class="package-credits">750 Credits</div>
-                     <button class="package-button">Buy Now</button>
-                 </div>
-             </div>
-             <div id="status" class="status"></div>
-             
-             <script>
-                 // Package data
-                 const packages = {
-                     basic: { name: "Basic Pack", credits: 100 },
-                     standard: { name: "Standard Pack", credits: 300 },
-                     premium: { name: "Premium Pack", credits: 750 }
-                 };
-                 
-                 // Listen for button clicks
-                 document.querySelectorAll('.package-button').forEach(button => {
-                     button.addEventListener('click', function() {
-                         // Get package ID from parent
-                         const packageId = this.closest('.package').dataset.packageId;
-                         
-                         // Disable all buttons to prevent multiple clicks
-                         document.querySelectorAll('.package-button').forEach(btn => {
-                             btn.disabled = true;
-                             btn.textContent = 'Processing...';
-                         });
-                         
-                         // Send message to parent window
-                         window.opener.postMessage({
-                             type: 'select_package',
-                             packageId: packageId,
-                             packageName: packages[packageId].name,
-                             credits: packages[packageId].credits
-                         }, '*');
-                     });
-                 });
-                 
-                 // Listen for messages from parent
-                 window.addEventListener('message', function(event) {
-                     if (event.data.type === 'payment_error') {
-                         // Show error
-                         const statusEl = document.getElementById('status');
-                         statusEl.textContent = event.data.message || 'An error occurred.';
-                         statusEl.className = 'status error';
-                         
-                         // Re-enable buttons
-                         document.querySelectorAll('.package-button').forEach(btn => {
-                             btn.disabled = false;
-                             btn.textContent = 'Buy Now';
-                         });
-                     }
-                     else if (event.data.type === 'payment_initiated') {
-                         // Close this window as payment window is opening
-                         window.close();
-                     }
-                 });
-             </script>
-         </body>
-         </html>
-     `);
-     
-     // Listen for messages from the package window
-     window.addEventListener('message', function(event) {
-         if (event.data.type === 'select_package') {
-             handlePackageSelection(event.data.packageId, event.data.packageName, event.data.credits, token, packageWindow);
-         }
-     });
-}
-
-// New helper function to handle package selection
-async function handlePackageSelection(packageId, packageName, credits, token, packageWindow) {
-    try {
-        // Step 1: Contact backend to create payment order
-        console.log(`Creating payment order for package: ${packageId}`);
-        
-        const orderResponse = await fetch(`${API_URL}/credits/create-order`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ package: packageId })
-        });
-        
-        if (!orderResponse.ok) {
-            const errorData = await orderResponse.json();
-            throw new Error(errorData.detail || 'Failed to create payment order');
-        }
-        
-        const orderData = await orderResponse.json();
-        console.log("Payment order created:", orderData);
-        
-        // Prepare package info for the payment popup context
-        const packageInfo = { name: packageName, credits };
-        
-        // Send message to background script to open the payment popup window
-        chrome.runtime.sendMessage({
-            action: "openPaymentPopup",
-            orderData: orderData,
-            packageInfo: packageInfo,
-            token: token
-        }, (response) => {
-            if (chrome.runtime.lastError) {
-                packageWindow.postMessage({
-                    type: 'payment_error',
-                    message: `Error opening payment window: ${chrome.runtime.lastError.message}`
-                }, '*');
-            } else if (response && response.success) {
-                // Notify package window that payment has been initiated
-                packageWindow.postMessage({
-                    type: 'payment_initiated'
-                }, '*');
-                
-                console.log('Payment window opened successfully');
+    console.log("Buy Credits button clicked in sidebar");
+    
+    // Show small notification in sidebar first
+    const creditsValueElement = document.getElementById('sidebar-credits-value');
+    if (creditsValueElement) {
+        creditsValueElement.textContent = "Loading...";
+    }
+    
+    // First try to get token from localStorage
+    let token = localStorage.getItem('auth_token');
+    console.log("Retrieved token from localStorage:", token ? "Token exists (length: " + token.length + ")" : "No token found");
+    
+    // If not in localStorage, try chrome.storage
+    if (!token) {
+        console.log("No token in localStorage, checking chrome.storage...");
+        chrome.storage.local.get(['auth_token'], function(result) {
+            if (result && result.auth_token) {
+                console.log("Token found in chrome.storage, using it");
+                processWithToken(result.auth_token);
             } else {
-                packageWindow.postMessage({
-                    type: 'payment_error',
-                    message: `Failed to open payment window: ${response?.error || 'Unknown error'}`
-                }, '*');
+                // No token found anywhere
+                console.error("No authentication token found");
+                alert("Please log in to purchase credits.");
+                if (creditsValueElement) {
+                    creditsValueElement.textContent = "Login required";
+                }
             }
         });
-    } catch (error) {
-        console.error('Error initiating credit purchase:', error);
-        
-        // Send error message to package window
-        packageWindow.postMessage({
-            type: 'payment_error',
-            message: `Purchase Error: ${error.message}`
-        }, '*');
+    } else {
+        // We have a token from localStorage
+        processWithToken(token);
+    }
+    
+    // Function to handle the actual window opening with a token
+    function processWithToken(authToken) {
+        try {
+            // Get the full URL to the packages.html file and append token as URL parameter
+            const packageUrl = chrome.runtime.getURL('src/payment/packages.html') + `?token=${encodeURIComponent(authToken)}`;
+            console.log("Opening package window with URL containing token");
+            
+            // Open a separate window with package options from our HTML file
+            const packageWindow = window.open(packageUrl, 'ChessAnalyzerPackages', 'width=500,height=650,resizable=yes');
+            
+            if (!packageWindow) {
+                alert("Pop-up blocked! Please allow pop-ups for this site to purchase credits.");
+                if (creditsValueElement) {
+                    creditsValueElement.textContent = "Error";
+                }
+                return;
+            }
+
+            // Monitor window close
+            const windowCheckInterval = setInterval(function() {
+                if (packageWindow.closed) {
+                    clearInterval(windowCheckInterval);
+                    console.log("Package window was closed by user");
+                    // Refresh credit display
+                    fetchUserCredits();
+                }
+            }, 500);
+            
+        } catch (error) {
+            console.error("Error opening package window:", error);
+            alert("An error occurred while opening the payment window. Please try again.");
+            if (creditsValueElement) {
+                creditsValueElement.textContent = "Error";
+            }
+        }
     }
 }
 

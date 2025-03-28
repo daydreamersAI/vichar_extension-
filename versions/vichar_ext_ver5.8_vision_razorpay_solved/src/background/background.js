@@ -318,6 +318,59 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
              })();
              break;
 
+        case "createPaymentOrder": // Received from popup to create an order
+            console.log("Received createPaymentOrder request");
+            isAsync = true;
+            (async () => {
+                try {
+                    // Get the authentication token
+                    const { auth_token: token } = await chrome.storage.local.get(['auth_token']);
+                    if (!token) {
+                        sendResponse({ success: false, error: "Authentication required" });
+                        return;
+                    }
+
+                    // Create the order via the API
+                    const response = await fetch(`${API_URL}/credits/create-order`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            package: request.packageInfo.id
+                        })
+                    });
+
+                    // Handle API errors
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error("Create order API error:", errorText);
+                        sendResponse({ success: false, error: `Failed to create order: ${response.status}` });
+                        return;
+                    }
+
+                    // Process the order data
+                    const orderData = await response.json();
+                    console.log("Order created successfully:", orderData);
+
+                    // Add the token to the order data for later use
+                    orderData.token = token;
+
+                    // Send back the order data to the popup
+                    sendResponse({ 
+                        success: true, 
+                        orderData: orderData,
+                        packageInfo: request.packageInfo
+                    });
+
+                } catch (error) {
+                    console.error("Error creating payment order:", error);
+                    sendResponse({ success: false, error: error.message });
+                }
+            })();
+            break;
+
         case "verifyPaymentFromPopup": // Received FROM payment.js after Razorpay success
              console.log("Received verifyPaymentFromPopup request");
              isAsync = true;
@@ -414,6 +467,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
              })();
              break;
 
+        // Support for direct Razorpay loading in content scripts (avoiding CSP issues)
+        case "loadRazorpayCheckout":
+            console.log("Loading Razorpay checkout from background script");
+            isAsync = true;
+            (async () => {
+                try {
+                    // Get the current active tab
+                    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                    
+                    if (!activeTab) {
+                        sendResponse({ success: false, error: "No active tab found" });
+                        return;
+                    }
+                    
+                    const tabId = activeTab.id;
+                    const options = request.options;
+                    
+                    // Inject a script to create Razorpay checkout
+                    await chrome.scripting.executeScript({
+                        target: { tabId },
+                        func: injectRazorpayCheckout,
+                        args: [options]
+                    });
+                    
+                    sendResponse({ success: true });
+                } catch (error) {
+                    console.error("Error loading Razorpay:", error);
+                    sendResponse({ success: false, error: error.message });
+                }
+            })();
+            return true;
+
         default:
             console.log("Background received unknown message action:", request.action);
             // Optionally send a response for unhandled actions
@@ -427,6 +512,57 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 
 // --- Utility Functions ---
+
+// Function to be injected into the page to create Razorpay checkout
+function injectRazorpayCheckout(options) {
+    // We need to inject our own local version of Razorpay
+    // Create a blob URL with a script that will load our extension's Razorpay script
+    const initScript = `
+        // Function to load Razorpay from extension
+        function loadRazorpayFromExtension() {
+            const options = ${JSON.stringify(options)};
+            
+            if (window.Razorpay) {
+                const rzp = new window.Razorpay(options);
+                rzp.open();
+                return;
+            }
+            
+            // Look for the extension's script
+            const extensionId = '${chrome.runtime.id}';
+            const script = document.createElement('script');
+            script.src = 'chrome-extension://' + extensionId + '/lib/razorpay-checkout.js';
+            script.onload = function() {
+                const rzp = new window.Razorpay(options);
+                rzp.open();
+            };
+            script.onerror = function() {
+                alert("Could not load payment gateway. Please try again later.");
+                const overlay = document.getElementById('credits-modal-overlay');
+                if (overlay) {
+                    document.body.removeChild(overlay);
+                }
+            };
+            document.head.appendChild(script);
+        }
+
+        // Execute immediately
+        loadRazorpayFromExtension();
+    `;
+    
+    // Inject this script
+    const script = document.createElement('script');
+    const blob = new Blob([initScript], { type: 'text/javascript' });
+    script.src = URL.createObjectURL(blob);
+    script.onload = function() {
+        // Clean up the URL once the script is loaded
+        URL.revokeObjectURL(script.src);
+    };
+    
+    document.head.appendChild(script);
+    
+    return true;
+}
 
 // Test API connectivity at startup (optional but helpful)
 function testApiConnection() {
