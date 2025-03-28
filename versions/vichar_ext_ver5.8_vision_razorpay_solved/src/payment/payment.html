@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Analyzer - Payment</title>
+  <!-- Simple Font CSP Blocker - prevents Google Fonts loading in this page -->
+  <script>
+    // Basic blocker for this page only
+    const originalCreateElement = document.createElement;
+    document.createElement = function(tagName) {
+      const element = originalCreateElement.call(document, tagName);
+      if (tagName.toLowerCase() === 'link') {
+        const originalSetAttribute = element.setAttribute;
+        element.setAttribute = function(name, value) {
+          if (name === 'href' && value && (value.includes('fonts.googleapis.com') || value.includes('fonts.gstatic.com'))) {
+            console.log('Blocked external font loading:', value);
+            return;
+          }
+          return originalSetAttribute.call(this, name, value);
+        };
+      }
+      return element;
+    };
+  </script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f8f9fa;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 90vh;
+    }
+    
+    .container {
+      width: 100%;
+      max-width: 450px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+      padding: 30px;
+      text-align: center;
+    }
+    
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+      color: #4285f4;
+    }
+    
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 20px;
+    }
+    
+    .package-info {
+      background-color: #f0f9f4;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 30px;
+      text-align: left;
+      border: 1px solid #d0e9d8;
+    }
+    
+    .package-name {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #34a853;
+    }
+    
+    .package-details {
+      font-size: 14px;
+      color: #555;
+      margin-bottom: 5px;
+    }
+    
+    .price {
+      font-size: 24px;
+      font-weight: 700;
+      margin: 15px 0;
+      color: #34a853;
+    }
+    
+    .btn {
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background-color 0.2s;
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    
+    .btn-primary {
+      background-color: #4285f4;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background-color: #3367d6;
+    }
+    
+    .btn-secondary {
+      background-color: #f1f3f4;
+      color: #333;
+    }
+    
+    .btn-secondary:hover {
+      background-color: #e8eaed;
+    }
+    
+    .loading {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      margin-top: 20px;
+    }
+    
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #4285f4;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 15px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .status-message {
+      display: none;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+      font-weight: 500;
+    }
+    
+    .success {
+      background-color: #e6f4ea;
+      color: #137333;
+      border: 1px solid #ceead6;
+    }
+    
+    .error {
+      background-color: #fce8e6;
+      color: #c5221f;
+      border: 1px solid #f6aea9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Chess Analyzer Payment</h1>
+    
+    <div class="package-info">
+      <div class="package-name" id="package-name">Loading...</div>
+      <div class="package-details" id="credits-amount">Loading...</div>
+      <div class="price" id="price">$0.00</div>
+    </div>
+    
+    <button id="pay-button" class="btn btn-primary">Proceed to Payment</button>
+    <button id="cancel-button" class="btn btn-secondary">Cancel</button>
+    
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div id="loading-text">Processing payment...</div>
+    </div>
+    
+    <div class="status-message" id="status-message"></div>
+  </div>
+
+  <!-- No need to include Razorpay script here since it will be loaded in a new window -->
+  <script src="payment.js"></script>
+</body>
+</html> 
