@@ -271,7 +271,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
              (async () => {
                  try {
                      // Optional: Get user info for prefill
-                     const userInfo = await chrome.storage.local.get(['user_name', /* 'user_email' */]);
+                     const userInfo = await chrome.storage.local.get(['user_name', 'user_email']);
 
                      // Create the popup window
                      const popupWindow = await chrome.windows.create({
@@ -302,12 +302,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                          popupId: popupWindow.id, // ID to allow closing the window later
                          // Prefill info
                          user_name: userInfo?.user_name || '',
-                         // user_email: userInfo?.user_email || ''
+                         user_email: userInfo?.user_email || ''
                      };
 
-                     // Store data temporarily using session storage (clears on browser close)
+                     // Store data temporarily using both session storage (for newer mechanism) and local storage (for backward compatibility)
                      await chrome.storage.session.set({ 'paymentDataForPopup': paymentDataForPopup });
-                     console.log("Payment context stored in session storage for popup ID:", popupWindow.id);
+                     await chrome.storage.local.set({ 'paymentData': paymentDataForPopup });
+                     
+                     // Also store payment data specifically for verification later
+                     await chrome.storage.local.set({ 'payment_data': { 
+                         packageInfo: request.packageInfo 
+                     }});
+                     
+                     console.log("Payment context stored in session and local storage for popup ID:", popupWindow.id);
 
                      sendResponse({ success: true, popupId: popupWindow.id }); // Respond to popup
 
@@ -330,40 +337,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         return;
                     }
 
-                    // Create the order via the API
-                    const response = await fetch(`${API_URL}/credits/create-order`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            package: request.packageInfo.id
-                        })
-                    });
+                    // First try with the /payments/create-order endpoint (v5.4 method)
+                    try {
+                        console.log("Trying order creation with /payments/create-order endpoint");
+                        const response = await fetch(`${API_URL}/payments/create-order`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                package: request.packageInfo.id
+                            })
+                        });
 
-                    // Handle API errors
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        console.error("Create order API error:", errorText);
-                        sendResponse({ success: false, error: `Failed to create order: ${response.status}` });
-                        return;
+                        // If this succeeds, use it
+                        if (response.ok) {
+                            const orderData = await response.json();
+                            console.log("Order created successfully with /payments/create-order endpoint:", orderData);
+                            
+                            // Add the token to the order data for later use
+                            orderData.token = token;
+
+                            // Send back the order data to the popup
+                            sendResponse({ 
+                                success: true, 
+                                orderData: orderData,
+                                packageInfo: request.packageInfo
+                            });
+                            return;
+                        } else {
+                            // If it fails with a 404 (not found), try the /credits/ endpoint
+                            if (response.status === 404) {
+                                throw new Error("Endpoint not found, trying alternative");
+                            } else {
+                                const errorText = await response.text();
+                                console.error("Create order API error:", errorText);
+                                throw new Error(`Failed to create order: ${response.status}`);
+                            }
+                        }
+                    } catch (firstError) {
+                        // If the first attempt fails, try with the /credits/create-order endpoint (v5.8 method)
+                        console.log("First order creation attempt failed, trying with /credits/create-order endpoint:", firstError.message);
+                        
+                        const response = await fetch(`${API_URL}/credits/create-order`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                package: request.packageInfo.id
+                            })
+                        });
+
+                        // Handle API errors
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error("Create order API error (fallback):", errorText);
+                            sendResponse({ success: false, error: `Failed to create order: ${response.status}` });
+                            return;
+                        }
+
+                        // Process the order data
+                        const orderData = await response.json();
+                        console.log("Order created successfully with /credits/create-order endpoint:", orderData);
+
+                        // Add the token to the order data for later use
+                        orderData.token = token;
+
+                        // Send back the order data to the popup
+                        sendResponse({ 
+                            success: true, 
+                            orderData: orderData,
+                            packageInfo: request.packageInfo
+                        });
                     }
-
-                    // Process the order data
-                    const orderData = await response.json();
-                    console.log("Order created successfully:", orderData);
-
-                    // Add the token to the order data for later use
-                    orderData.token = token;
-
-                    // Send back the order data to the popup
-                    sendResponse({ 
-                        success: true, 
-                        orderData: orderData,
-                        packageInfo: request.packageInfo
-                    });
-
                 } catch (error) {
                     console.error("Error creating payment order:", error);
                     sendResponse({ success: false, error: error.message });
@@ -380,7 +429,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                  let errorMsg = "Verification failed.";
 
                  try {
-                     const { auth_token: token } = await chrome.storage.local.get(['auth_token']);
+                     const storageData = await chrome.storage.local.get(['auth_token', 'payment_data']);
+                     const token = storageData.auth_token;
+                     const paymentData = storageData.payment_data;
+                     
                      if (!token) throw new Error("Authentication token not found.");
 
                      const { paymentResponse, packageInfo } = request;
@@ -388,29 +440,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                          throw new Error("Incomplete payment response from popup.");
                      }
                      if (!packageInfo?.credits) {
-                          throw new Error("Missing package info (credits) from popup.");
+                         throw new Error("Missing package info (credits) from popup.");
                      }
 
-                     // Call backend to verify payment
-                     const response = await fetch(`${API_URL}/credits/verify-payment`, {
-                         method: 'POST',
-                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                         body: JSON.stringify({
-                             razorpay_payment_id: paymentResponse.razorpay_payment_id,
-                             razorpay_order_id: paymentResponse.razorpay_order_id,
-                             razorpay_signature: paymentResponse.razorpay_signature
-                         })
-                     });
+                     // First try with the /payments/verify-payment endpoint (v5.4 method)
+                     try {
+                         console.log("Trying payment verification with /payments/verify-payment endpoint");
+                         const response = await fetch(`${API_URL}/payments/verify-payment`, {
+                             method: 'POST',
+                             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                                 razorpay_payment_id: paymentResponse.razorpay_payment_id,
+                                 razorpay_order_id: paymentResponse.razorpay_order_id,
+                                 razorpay_signature: paymentResponse.razorpay_signature
+                             })
+                         });
 
-                     if (!response.ok) {
-                         let detail = `Verification API Error: ${response.status}`;
-                         try { detail = (await response.json()).detail || detail; } catch(e){}
-                         throw new Error(detail);
+                         // If this succeeds, use it
+                         if (response.ok) {
+                             verificationResult = await response.json();
+                             console.log("Payment verification successful using /payments/verify-payment endpoint:", verificationResult);
+                             verificationSuccess = true;
+                         } else {
+                             // If it fails with a 404 (not found), try the /credits/ endpoint
+                             if (response.status === 404) {
+                                 throw new Error("Endpoint not found, trying alternative");
+                             } else {
+                                 // For other errors, get error details and throw
+                                 let detail = `Verification API Error: ${response.status}`;
+                                 try { detail = (await response.json()).detail || detail; } catch(e){}
+                                 throw new Error(detail);
+                             }
+                         }
+                     } catch (firstError) {
+                         // If the first attempt fails, try with the /credits/verify-payment endpoint (v5.8 method)
+                         console.log("First verification attempt failed, trying with /credits/verify-payment endpoint:", firstError.message);
+                         
+                         const response = await fetch(`${API_URL}/credits/verify-payment`, {
+                             method: 'POST',
+                             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                                 razorpay_payment_id: paymentResponse.razorpay_payment_id,
+                                 razorpay_order_id: paymentResponse.razorpay_order_id,
+                                 razorpay_signature: paymentResponse.razorpay_signature
+                             })
+                         });
+
+                         if (!response.ok) {
+                             let detail = `Verification API Error: ${response.status}`;
+                             try { detail = (await response.json()).detail || detail; } catch(e){}
+                             throw new Error(detail);
+                         }
+
+                         verificationResult = await response.json();
+                         console.log("Payment verification successful using /credits/verify-payment endpoint:", verificationResult);
+                         verificationSuccess = true;
                      }
-
-                     verificationResult = await response.json(); // Should contain { success, credits_added, current_balance }
-                     console.log("Payment verification successful (backend):", verificationResult);
-                     verificationSuccess = true;
 
                      // Send success message back to the popup
                      sendResponse({ success: true, verificationData: verificationResult });

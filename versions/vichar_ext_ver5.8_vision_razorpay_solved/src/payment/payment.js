@@ -57,15 +57,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   
     // --- Initialize: Load payment data ---
     try {
-        // Get payment data from session storage
-        const result = await chrome.storage.session.get(['paymentDataForPopup']);
-        paymentData = result.paymentDataForPopup;
+        // First try to get payment data from session storage (new mechanism)
+        const sessionResult = await chrome.storage.session.get(['paymentDataForPopup']);
+        
+        if (sessionResult.paymentDataForPopup) {
+            console.log('Payment data loaded from session storage');
+            paymentData = sessionResult.paymentDataForPopup;
+            // Clear session storage after retrieving
+            await chrome.storage.session.remove(['paymentDataForPopup']);
+        } else {
+            // Fallback to local storage (old mechanism)
+            console.log('Session storage empty, trying local storage');
+            const localResult = await chrome.storage.local.get(['paymentData']);
+            
+            if (localResult.paymentData) {
+                console.log('Payment data loaded from local storage');
+                paymentData = localResult.paymentData;
+                // Clear local storage after retrieving
+                await chrome.storage.local.remove(['paymentData']);
+            }
+        }
         
         if (paymentData) {
             console.log('Payment data loaded:', paymentData);
-            
-            // Clear the data from session storage after retrieving it
-            await chrome.storage.session.remove(['paymentDataForPopup']);
             
             // Display package info
             if (packageNameElement) packageNameElement.textContent = paymentData.packageName || 'Selected Package';
@@ -162,7 +176,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     });
                 },
                 prefill: {
-                    name: data.user_name || ''
+                    name: data.user_name || '',
+                    email: data.user_email || ''
                 },
                 theme: {
                     color: '#4285F4'
