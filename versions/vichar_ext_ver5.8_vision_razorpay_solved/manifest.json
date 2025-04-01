@@ -56,20 +56,20 @@
   "web_accessible_resources": [
     {
       "resources": [
-      "src/analysis/analysis.html",
-      "src/content/sidebar.js",
-      "src/content/*.js",
-      "src/payment/payment.html",
-      "src/payment/*.js",
-      "lib/*.js",
-      "lib/razorpay-checkout.js",
-      "fonts/*",
-      "icons/*"
-    ],
+        "src/analysis/analysis.html",
+        "src/content/sidebar.js",
+        "src/content/*.js",
+        "src/payment/payment.html",
+        "src/payment/*.js",
+        "lib/*.js",
+        "lib/razorpay-checkout.js",
+        "fonts/*",
+        "icons/*"
+      ],
       "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {
-  "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://*.razorpay.com; font-src 'self' data:; img-src 'self' data: blob:;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://*.razorpay.com; font-src 'self' data:; img-src 'self' data: blob:;"
   }
 }

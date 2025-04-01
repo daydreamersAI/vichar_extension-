@@ -371,7 +371,7 @@ document.addEventListener('DOMContentLoaded', function() {
   
         try {
             const response = await fetch(`${API_URL}/credits/balance`, {
-                headers: { 'Authorization': token } // Use token directly
+                headers: { 'Authorization': `Bearer ${token}` } // Add Bearer prefix
             });
             if (!response.ok) {
                 const errText = await response.text();
@@ -404,7 +404,7 @@ document.addEventListener('DOMContentLoaded', function() {
   
         try {
             const response = await fetch(`${API_URL}/payments/credits/packages`, {
-                headers: { 'Authorization': token } // Use token directly
+                headers: { 'Authorization': `Bearer ${token}` } // Add Bearer prefix
             });
             if (!response.ok) throw new Error(`Failed to load packages (${response.status})`);
             const data = await response.json();
@@ -454,54 +454,70 @@ document.addEventListener('DOMContentLoaded', function() {
         const button = event.target;
         const packageId = button.getAttribute('data-package-id');
         const credits = parseInt(button.getAttribute('data-credits'), 10);
-        const name = button.getAttribute('data-name'); // Using description as name for now
+        const name = button.getAttribute('data-name');
         const token = localStorage.getItem('auth_token');
-  
+    
         if (!packageId || !token || !credits || !name) {
-             showStatus('Error: Missing purchase details.', 'error'); return;
+            showStatus('Error: Missing purchase details.', 'error'); return;
         }
-  
+    
         // Disable all buy buttons to prevent multiple clicks
         document.querySelectorAll('.buy-credits-btn').forEach(btn => {
             btn.disabled = true;
             btn.textContent = 'Processing...';
         });
         showStatus('Preparing payment...', 'info');
-  
+    
         try {
-            // Send message to background script to handle order creation AND popup opening
-            chrome.runtime.sendMessage({
-                action: "openPaymentPopup", // Reusing this action name, background handles order creation first
-                packageId: packageId,
-                packageName: name, // Pass name/description
-                credits: credits,
-                token: token // Pass token needed for order creation and verification
-            }, (response) => {
-                // Re-enable buttons once background responds
-                 document.querySelectorAll('.buy-credits-btn').forEach(btn => {
-                     btn.disabled = false;
-                     btn.textContent = 'Buy Now';
-                 });
-  
-                if (chrome.runtime.lastError) {
-                    showStatus(`Error opening payment window: ${chrome.runtime.lastError.message}`, 'error');
-                } else if (response && response.success) {
-                    showStatus('Payment window opening...', 'success');
-                    // Don't close popup yet, let user see message. Background handles popup window.
-                    // window.close(); // No need to close here
-                } else {
-                    showStatus(`Failed to initiate payment: ${response?.error || 'Unknown error'}`, 'error');
-                }
+            // First, call the background script to create an order
+            const orderResponse = await new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage({
+                    action: "createPaymentOrder",
+                    packageInfo: {
+                        id: packageId,
+                        name: name,
+                        credits: credits
+                    }
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response && response.success) {
+                        resolve(response);
+                    } else {
+                        reject(new Error(response?.error || 'Failed to create order'));
+                    }
+                });
             });
-  
+    
+            // Then, if order creation succeeded, open the payment popup
+            await new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage({
+                    action: "openPaymentPopup",
+                    orderData: orderResponse.orderData,
+                    packageInfo: orderResponse.packageInfo,
+                    token: token
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response && response.success) {
+                        resolve(response);
+                    } else {
+                        reject(new Error(response?.error || 'Failed to open payment popup'));
+                    }
+                });
+            });
+    
+            showStatus('Payment window opening...', 'success');
+    
         } catch (error) {
             console.error('Error initiating credit purchase:', error);
             showStatus(`Purchase Error: ${error.message}`, 'error');
-            // Re-enable buttons on error
-             document.querySelectorAll('.buy-credits-btn').forEach(btn => {
-                 btn.disabled = false;
-                 btn.textContent = 'Buy Now';
-             });
+        } finally {
+            // Re-enable buttons in finally block to ensure they're always re-enabled
+            document.querySelectorAll('.buy-credits-btn').forEach(btn => {
+                btn.disabled = false;
+                btn.textContent = 'Buy Now';
+            });
         }
     }
   
