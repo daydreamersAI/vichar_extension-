@@ -1,6 +1,10 @@
 // API Configuration for Chess Analysis Extension
 // This file centralizes API configuration for easier updates
 
+// Import PostHog tracking utility 
+// Import path is relative to where this file is used
+import { trackEvent } from './src/utils/analytics.js';
+
 // Updated to match your deployed FastAPI server
 const API_CONFIG = {
   // Base URL for API access
@@ -62,6 +66,14 @@ async function callApi(endpoint, data, method = 'POST') {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeout);
     
+    // Track API call initiated
+    if (typeof trackEvent === 'function') {
+      trackEvent('api_call_initiated', {
+        endpoint: endpoint,
+        method: method
+      });
+    }
+    
     const response = await fetch(url, {
       method: method,
       headers: getAuthHeaders(),
@@ -72,12 +84,37 @@ async function callApi(endpoint, data, method = 'POST') {
     clearTimeout(timeoutId);
     
     if (!response.ok) {
+      // Track API call failed
+      if (typeof trackEvent === 'function') {
+        trackEvent('api_call_failed', {
+          endpoint: endpoint,
+          method: method,
+          status: response.status,
+          statusText: response.statusText
+        });
+      }
       throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+    
+    // Track API call success
+    if (typeof trackEvent === 'function') {
+      trackEvent('api_call_succeeded', {
+        endpoint: endpoint,
+        method: method
+      });
     }
     
     return await response.json();
   } catch (error) {
     console.error(`Error calling ${endpoint}:`, error);
+    // Track API call error (for network/timeout errors)
+    if (typeof trackEvent === 'function' && !error.message.startsWith('API error')) {
+      trackEvent('api_call_error', {
+        endpoint: endpoint,
+        method: method,
+        error: error.message
+      });
+    }
     throw error;
   }
 }

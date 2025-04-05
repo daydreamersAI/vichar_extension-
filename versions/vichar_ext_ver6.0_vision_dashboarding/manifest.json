@@ -72,6 +72,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://*.razorpay.com; font-src 'self' data:; img-src 'self' data: blob:;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.beekayprecision.com https://*.razorpay.com https://us.posthog.com; font-src 'self' data:; img-src 'self' data: blob:;"
   }
 }

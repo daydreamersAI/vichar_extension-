@@ -1,3 +1,24 @@
+// Define our own tracking function that uses the window.posthog object
+function trackEvent(eventName, properties = {}) {
+  if (typeof window.posthog !== 'undefined') {
+    // Add user identifier if available
+    const userId = localStorage.getItem('user_id');
+    const userName = localStorage.getItem('user_name');
+    
+    if (userId) {
+      window.posthog.identify(userId, {
+        name: userName || 'Anonymous User'
+      });
+    }
+    
+    // Track the event
+    window.posthog.capture(eventName, properties);
+    console.log(`[Analytics] Tracked: ${eventName}`, properties);
+  } else {
+    console.log(`[Analytics] Would track: ${eventName}`, properties);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // --- Get DOM Elements ---
     const captureButton = document.getElementById('captureBtn'); // For New Tab analysis
@@ -166,6 +187,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 'user_name': data.name
             });
   
+            // Track login success
+            trackEvent('user_login', {
+                user_id: data.user_id
+            });
+  
             showStatus('Login successful!', 'success');
             await checkAuthStatus(); // Update UI (fetches credits, shows packages)
   
@@ -184,6 +210,9 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Login error:', error);
             const errorMsg = (error.name === 'AbortError') ? "Request timed out." : error.message;
             showStatus(`Login failed: ${errorMsg}`, 'error');
+        } finally {
+             loginBtn.disabled = false;
+             loginBtn.textContent = 'Login';
         }
     }
   
@@ -309,13 +338,19 @@ document.addEventListener('DOMContentLoaded', function() {
             captureButton.disabled = true;
             try {
                 const tab = await getCurrentTab(); // Use helper to get validated tab
-  
+
                 // Send message to background script to handle capture
                 chrome.runtime.sendMessage({ action: "captureBoard", tabId: tab.id }, (response) => {
                     captureButton.disabled = false; // Re-enable button
                     if (chrome.runtime.lastError) {
                         showStatus(`Error: ${chrome.runtime.lastError.message}`, 'error');
                     } else if (response && response.success) {
+                        // Track successful capture
+                        trackEvent('board_captured', {
+                            source_site: tab.url.includes('lichess.org') ? 'lichess' : 
+                                        tab.url.includes('chess.com') ? 'chess.com' : 'other'
+                        });
+                        
                         showStatus('Board captured! Opening analysis...', 'success');
                         // Background script's injectCaptureScript saves data. Open the page.
                         chrome.tabs.create({ url: chrome.runtime.getURL("src/analysis/analysis.html") });
@@ -337,21 +372,23 @@ document.addEventListener('DOMContentLoaded', function() {
         sidebarButton.addEventListener('click', async () => {
             console.log("Sidebar button clicked");
             if (!isLoggedIn()) { showStatus('Please log in first.', 'error'); return; }
-            showStatus('Requesting sidebar...', 'info');
             sidebarButton.disabled = true;
+            showStatus('Opening sidebar...', 'info');
+            
             try {
-                const tab = await getCurrentTab(); // Get validated tab
-  
-                // Send message to background script to request sidebar toggle
-                chrome.runtime.sendMessage({ action: "showSidebar", tabId: tab.id }, (response) => {
-                    sidebarButton.disabled = false; // Re-enable button
+                // Track sidebar opened
+                trackEvent('sidebar_opened');
+                
+                // Send message to background script to handle sidebar
+                chrome.runtime.sendMessage({ action: "showSidebar" }, (response) => {
+                    sidebarButton.disabled = false;
                     if (chrome.runtime.lastError) {
                         showStatus(`Error: ${chrome.runtime.lastError.message}`, 'error');
                     } else if (response && response.success) {
-                        showStatus('Sidebar requested.', 'success');
-                        window.close(); // Close popup after successful request
+                        showStatus('Sidebar opened!', 'success');
+                        window.close(); // Close popup
                     } else {
-                        showStatus(`Failed to open sidebar: ${response?.error || 'Communication error'}`, 'error');
+                        showStatus(`Failed to open sidebar: ${response?.message || 'Unknown error'}`, 'error');
                     }
                 });
             } catch (error) {

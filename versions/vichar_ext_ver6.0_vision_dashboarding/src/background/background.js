@@ -2,6 +2,41 @@
 // Ensure the path is correct relative to your background script location
 import { injectCaptureScript } from './scriptInjector.js';
 
+// Define our own tracking function 
+function trackEvent(eventName, properties = {}) {
+  console.log(`[Analytics] Background tracked: ${eventName}`, properties);
+  
+  // Attempt to send to PostHog API directly if needed
+  try {
+    const API_KEY = 'phc_adv1CiTCnHjOooqSr6WC7qFCADeuv4SFJasGXKiRmAe';
+    const API_HOST = 'https://us.posthog.com';
+    
+    const payload = {
+      api_key: API_KEY,
+      event: eventName,
+      properties: {
+        ...properties,
+        $lib: 'chess-extension-background',
+        distinct_id: properties.user_id || 'anonymous'
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    // Use the connect-src permission to send data
+    fetch(`${API_HOST}/capture/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    }).catch(err => {
+      console.warn('[PostHog] Failed to send event:', err);
+    });
+  } catch (err) {
+    console.warn('Error tracking event:', err);
+  }
+}
+
 // API configuration
 const API_URL = "https://api.beekayprecision.com"; // Use HTTPS
 
@@ -177,6 +212,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (!question || !capturedBoard?.fen) {
                         throw new Error("Missing required data for analysis (question or FEN).");
                     }
+                    
+                    // Track analysis request
+                    trackEvent('chess_analysis_requested', {
+                        model: model || "Default",
+                        use_vision: useVision,
+                        has_history: chatHistory?.length > 0
+                    });
 
                     // Prepare image data if needed
                     let imageDataBase64 = null;
@@ -205,15 +247,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             'Authorization': `Bearer ${token}`
                         },
                         body: JSON.stringify({
-                            message: question,
+                            question: question,
                             fen: capturedBoard.fen,
                             pgn: capturedBoard.pgn || "",
                             image_data: imageDataBase64, // Send base64 string or null
                             chat_history: chatHistory || [],
                             model: model, // *** Pass the selected model ID ***
-                            // Add computer_evaluation/variation here if available
-                            computer_evaluation: capturedBoard.computerEvaluation || null,
-                            computer_variation: capturedBoard.computerVariation || null
+                            use_vision: useVision
                         })
                     });
 
@@ -244,7 +284,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         throw new Error("Invalid API response format - missing 'response' field");
                     }
 
-                    // Send successful analysis and credit info back to content script
+                    // Track analysis completion
+                    trackEvent('chess_analysis_completed', {
+                        model: model || "Default",
+                        success: true
+                    });
+                    
                     sendResponse({
                         success: true,
                         data: data.response,
@@ -253,11 +298,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 } catch (error) {
                     console.error("Error in analyzeChessPosition handler:", error);
+                    
+                    // Track analysis failure
+                    trackEvent('chess_analysis_failed', {
+                        model: model || "Default",
+                        error_type: error.message
+                    });
+                    
+                    // Format the error message for the UI
+                    const errorMsg = formatErrorMessage(error);
                     sendResponse({
                         success: false,
-                        // Provide specific error codes if possible
-                        error: error.message || "Failed to analyze position",
-                        errorCode: error.message.includes("Authentication required") ? "AUTH_REQUIRED" : "ANALYSIS_FAILED"
+                        error: errorMsg
                     });
                 }
             })();
@@ -778,3 +830,20 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Initial connection test when the background script loads
 testApiConnection();
+
+// Format error messages for the UI
+function formatErrorMessage(error) {
+    // If the error is an HTTP error response, handle it specially
+    if (error.status === 401 || error.message.includes("Authentication")) {
+        return "Authentication required. Please log in again.";
+    } else if (error.status === 402 || error.message.includes("Insufficient credits")) {
+        return "You've run out of credits. Please purchase more to continue.";
+    } else if (error.status === 429 || error.message.includes("Too many requests")) {
+        return "Too many requests. Please try again later.";
+    } else if (error.status === 500 || error.message.includes("server error")) {
+        return "Server error. Our team has been notified.";
+    }
+    
+    // For other errors, use the message directly
+    return error.message || "An unknown error occurred";
+}
