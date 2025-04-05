@@ -263,16 +263,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (!response.ok) {
                         let errorDetail = `API Error: ${response.status}`;
                         let errorCode = `HTTP_${response.status}`;
+                        
                         try {
-                            const errorJson = await response.json();
-                            errorDetail = errorJson.detail || errorDetail;
-                            if (response.status === 401) errorCode = "AUTH_REQUIRED";
-                            if (response.status === 402) errorCode = "INSUFFICIENT_CREDITS";
-                            // Add more specific error codes if the backend provides them
-                        } catch (e) { /* Ignore if error response is not JSON */ }
+                            // For 422 errors, we need more detailed information
+                            if (response.status === 422) {
+                                console.log("Received 422 Unprocessable Entity error - attempting to get detailed error info");
+                                const errorJson = await response.json();
+                                console.error("422 Error response:", JSON.stringify(errorJson, null, 2));
+                                
+                                // Extract useful details for debugging
+                                errorDetail = errorJson.detail || "Validation error with request data";
+                                
+                                // If the API returns specific validation errors, include them
+                                if (errorJson.validation_errors) {
+                                    const validationErrors = Array.isArray(errorJson.validation_errors) 
+                                        ? errorJson.validation_errors.join(', ')
+                                        : JSON.stringify(errorJson.validation_errors);
+                                    errorDetail += `: ${validationErrors}`;
+                                }
+                                
+                                errorCode = "VALIDATION_ERROR";
+                            } else {
+                                // Handle other error types
+                                const errorJson = await response.json();
+                                errorDetail = errorJson.detail || errorDetail;
+                                if (response.status === 401) errorCode = "AUTH_REQUIRED";
+                                if (response.status === 402) errorCode = "INSUFFICIENT_CREDITS";
+                            }
+                        } catch (e) {
+                            console.error("Error parsing error response:", e);
+                        }
+                        
                         console.error("Backend analysis error:", errorDetail);
+                        
                         // Send structured error back to content script
-                        sendResponse({ success: false, error: errorDetail, errorCode: errorCode });
+                        sendResponse({ 
+                            success: false, 
+                            error: errorDetail, 
+                            errorCode: errorCode,
+                            requestData: {
+                                model: model,
+                                useVision: useVision,
+                                hasHistory: chatHistory && chatHistory.length > 0,
+                                hasFen: !!capturedBoard.fen,
+                                hasImageData: !!imageDataBase64
+                            }
+                        });
                         return;
                     }
 

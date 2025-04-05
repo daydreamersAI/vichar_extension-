@@ -476,10 +476,17 @@ async function handleSidebarSendMessage() {
         } else if (res && res.success) {
           resolve(res);
         } else {
-          // Construct error message, including potential error codes from backend
-          let errorMsg = res?.error || "Analysis failed";
-          if (res?.errorCode) errorMsg += ` (Code: ${res.errorCode})`;
-          reject(new Error(errorMsg));
+          // Special handling for validation errors (HTTP 422)
+          if (res?.errorCode === "VALIDATION_ERROR" || res?.errorCode === "HTTP_422") {
+            console.warn("Validation error details:", res);
+            // Use custom validation error handling
+            reject({ isValidationError: true, model: modelUsedForThisRequest, useVision: useVision });
+          } else {
+            // Construct error message for other errors
+            let errorMsg = res?.error || "Analysis failed";
+            if (res?.errorCode) errorMsg += ` (Code: ${res.errorCode})`;
+            reject(new Error(errorMsg));
+          }
         }
       });
     });
@@ -498,8 +505,14 @@ async function handleSidebarSendMessage() {
 
   } catch (error) {
     console.error(`Error during sidebar analysis (${modelUsedForThisRequest}):`, error);
-    // Add error message to chat history, indicating the model attempted
-    displaySidebarError(`Analysis with ${Object.keys(AVAILABLE_MODELS).find(key => AVAILABLE_MODELS[key] === modelUsedForThisRequest) || modelUsedForThisRequest} failed: ${error.message}`);
+    
+    // Check if this is a validation error
+    if (error.isValidationError) {
+      displayValidationError(error.model, error.useVision);
+    } else {
+      // Regular error display
+      displaySidebarError(`Analysis with ${Object.keys(AVAILABLE_MODELS).find(key => AVAILABLE_MODELS[key] === modelUsedForThisRequest) || modelUsedForThisRequest} failed: ${error.message}`);
+    }
   } finally {
     showSidebarLoading(false); // Hide loading indicator, re-enable inputs
     // Render history again to show the response or the error message
@@ -1233,4 +1246,51 @@ function formatAPIResponse(response) {
 function getBase64FromImageSrc(src) {
    if (src && src.startsWith('data:image/')) { return src.split(',')[1]; }
    return null;
+}
+
+// Function to try fallback model when current model fails with 422
+function tryFallbackModel() {
+  // Get the current model select element
+  const modelSelect = document.getElementById('sidebar-model-select');
+  if (!modelSelect) return false;
+  
+  const currentModelValue = modelSelect.value;
+  
+  // Find fallback options based on current model
+  if (currentModelValue === 'gpt-4o') {
+    // If using gpt-4o, try gpt-4o-mini
+    console.log("Falling back from gpt-4o to gpt-4o-mini");
+    modelSelect.value = 'gpt-4o-mini';
+    selectedModel = 'gpt-4o-mini';
+    localStorage.setItem('selectedChessModel', selectedModel);
+    return true;
+  } 
+  else if (currentModelValue === 'gpt-4o-mini') {
+    // If using gpt-4o-mini, try gpt-3.5-turbo
+    console.log("Falling back from gpt-4o-mini to gpt-3.5-turbo");
+    modelSelect.value = 'gpt-3.5-turbo';
+    selectedModel = 'gpt-3.5-turbo';
+    localStorage.setItem('selectedChessModel', selectedModel);
+    return true;
+  }
+  
+  return false; // No fallback available
+}
+
+// Function to display a special error message for validation errors
+function displayValidationError(model, useVision) {
+  const errorMsg = `The server couldn't process this request with model "${model}"${useVision ? ' in vision mode' : ''}.`;
+  
+  let suggestedAction = '';
+  
+  // Add suggestion based on context
+  if (useVision) {
+    suggestedAction = ' Please try disabling vision mode.';
+  } else if (tryFallbackModel()) {
+    suggestedAction = ` Automatically switched to ${selectedModel}.`;
+  } else {
+    suggestedAction = ' Please try a different model.';
+  }
+  
+  displaySidebarError(errorMsg + suggestedAction);
 }
