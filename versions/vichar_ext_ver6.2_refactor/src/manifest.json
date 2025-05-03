@@ -1,0 +1,16 @@
+{
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/sidebar/sidebar.html",
+        "src/sidebar/sidebar.css",
+        "src/analysis/analysis.html",
+        "src/payment/payment.html",
+        "src/payment/packages.html",
+        "src/payment/packages.css",
+        "src/payment/packages.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+} 
