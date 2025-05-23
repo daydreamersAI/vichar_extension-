@@ -1161,8 +1161,8 @@ function captureChessBoard() {
       console.log("Starting Chess.com board capture with PGN:", pgn);
 
       try {
-          // Find the board element
-          const boardElement = document.querySelector('chess-board, div[class^="board "], div[class*="board-"]');
+          // Find the board element with more comprehensive selectors
+          const boardElement = document.querySelector('chess-board, div[class^="board"], div[class*="board-"], div[class*="chessboard"], div[data-board], div[id*="board"], .board-b72b1, .board-modal-board, .board-container');
           if (!boardElement) {
               throw new Error("Could not find Chess.com board element");
           }
@@ -1170,155 +1170,398 @@ function captureChessBoard() {
           // Get orientation
           const orientation = boardElement.classList.contains('flipped') || 
               boardElement.getAttribute('data-orientation') === 'black' ||
-                            document.querySelector('.board-flipped') ? 'black' : 'white';
+              document.querySelector('.board-flipped') ? 'black' : 'white';
+          console.log("Board orientation:", orientation);
 
           // Get the current FEN directly from Chess.com's internal state
           let fen = null;
 
           // Method 1: Try to get FEN from the game's internal state
-          if (window.ChessComGame?.game?.state?.fen) {
-              fen = window.ChessComGame.game.state.fen;
-              console.log("Got FEN from ChessComGame.game.state.fen:", fen);
-          } else if (window.ChessComGame?.game?.position?.fen) {
-              fen = window.ChessComGame.game.position.fen;
-              console.log("Got FEN from ChessComGame.game.position.fen:", fen);
-          } else if (window.ChessComGame?.game?.fen) {
-                      fen = window.ChessComGame.game.fen;
-              console.log("Got FEN from ChessComGame.game.fen:", fen);
-          } else if (typeof window.ChessComGame?.game?.getFen === 'function') {
-              fen = window.ChessComGame.game.getFen();
-              console.log("Got FEN from ChessComGame.game.getFen():", fen);
+          try {
+              if (window.ChessComGame?.game?.state?.fen) {
+                  fen = window.ChessComGame.game.state.fen;
+                  console.log("Got FEN from ChessComGame.game.state.fen:", fen);
+              } else if (window.ChessComGame?.game?.position?.fen) {
+                  fen = window.ChessComGame.game.position.fen;
+                  console.log("Got FEN from ChessComGame.game.position.fen:", fen);
+              } else if (window.ChessComGame?.game?.fen) {
+                  fen = typeof window.ChessComGame.game.fen === 'function' ? 
+                    window.ChessComGame.game.fen() : window.ChessComGame.game.fen;
+                  console.log("Got FEN from ChessComGame.game.fen:", fen);
+              } else if (typeof window.ChessComGame?.game?.getFen === 'function') {
+                  fen = window.ChessComGame.game.getFen();
+                  console.log("Got FEN from ChessComGame.game.getFen():", fen);
+              } else if (window.game?.getFen) {
+                  fen = window.game.getFen();
+                  console.log("Got FEN from window.game.getFen():", fen);
+              } else if (window.game?.fen) {
+                  fen = typeof window.game.fen === 'function' ? window.game.fen() : window.game.fen;
+                  console.log("Got FEN from window.game.fen:", fen);
+              } else if (window.chessboard?.getFen) {
+                  fen = window.chessboard.getFen();
+                  console.log("Got FEN from window.chessboard.getFen():", fen);
+              } else if (window.chessboard?.fen) {
+                  fen = typeof window.chessboard.fen === 'function' ? window.chessboard.fen() : window.chessboard.fen;
+                  console.log("Got FEN from window.chessboard.fen:", fen);
+              } else if (window.chess?.getFen) {
+                  fen = window.chess.getFen();
+                  console.log("Got FEN from window.chess.getFen():", fen);
+              } else if (window.chess?.fen) {
+                  fen = typeof window.chess.fen === 'function' ? window.chess.fen() : window.chess.fen;
+                  console.log("Got FEN from window.chess.fen:", fen);
+              }
+
+              if (fen && window.isValidFENFormat(fen)) {
+                  console.log("📊 [Capture] Got valid FEN from global object:", fen);
+              } else {
+                  fen = null;
+              }
+          } catch (e) {
+              console.warn("📊 [Capture] Could not get FEN from global objects:", e);
+              fen = null;
           }
 
           // Method 2: Try to get FEN from the board's data attributes
           if (!fen) {
-              const boardData = boardElement.getAttribute('data-fen') || 
-                              boardElement.getAttribute('data-position') ||
-                              boardElement.getAttribute('data-board');
-              
+              try {
+                  const boardData = boardElement.getAttribute('data-fen') || 
+                                  boardElement.getAttribute('data-position') ||
+                                  boardElement.getAttribute('data-board');
+                  
                   if (boardData) {
-                  try {
-                      const parsedData = JSON.parse(boardData);
-                      if (parsedData?.fen && isValidFENFormat(parsedData.fen)) {
-                          fen = parsedData.fen;
-                          console.log("Got FEN from parsed board data:", fen);
-                      }
-                  } catch (e) {
-                      if (boardData.includes('/') && isValidFENFormat(boardData)) {
-                      fen = boardData;
-                          console.log("Got FEN from raw board data:", fen);
+                      try {
+                          const parsedData = JSON.parse(boardData);
+                          if (parsedData?.fen && window.isValidFENFormat(parsedData.fen)) {
+                              fen = parsedData.fen;
+                              console.log("Got FEN from parsed board data:", fen);
+                          }
+                      } catch (e) {
+                          if (boardData.includes('/') && window.isValidFENFormat(boardData)) {
+                              fen = boardData;
+                              console.log("Got FEN from raw board data:", fen);
+                          }
                       }
                   }
+
+                  // Try other DOM selectors
+                  if (!fen) {
+                      const selectors = [
+                          '[data-fen]',
+                          '[data-position]',
+                          '[data-game-state]',
+                          '.move.selected[data-fen]',
+                          '.copy-fen-btn',
+                          '.share-menu-tab-pgn-textarea',
+                          '.board-modal-pgn-textarea',
+                          '.board-modal-fen-textarea',
+                          '.board-modal-position-textarea',
+                          '.board-modal-fen',
+                          '.board-modal-position',
+                          '.board-modal-state'
+                      ];
+                      
+                      for (const selector of selectors) {
+                          const elements = document.querySelectorAll(selector);
+                          for (const el of elements) {
+                              const possibleFen = el.getAttribute('data-fen') ||
+                                              el.getAttribute('data-position') ||
+                                              el.getAttribute('data-game-state') ||
+                                              el.value ||
+                                              el.textContent;
+                              if (possibleFen && window.isValidFENFormat(possibleFen)) {
+                                  fen = possibleFen;
+                                  console.log(`Got FEN from ${selector}:`, fen);
+                                  break;
+                              }
+                          }
+                          if (fen) break;
+                      }
+                  }
+              } catch (e) {
+                  console.warn("Could not get FEN from DOM attributes:", e);
               }
           }
 
-          // Method 3: Try to get FEN from the current move
+          // Method 3: Visual extraction
           if (!fen) {
-                  const currentMove = document.querySelector('.selected, .current, [class*="selected"], [class*="current"]');
-                  if (currentMove) {
-                      const moveData = currentMove.getAttribute('data-fen') || 
-                                     currentMove.getAttribute('data-position');
-                  if (moveData && isValidFENFormat(moveData)) {
-                          fen = moveData;
-                          console.log("Got FEN from current move:", fen);
+              try {
+                  console.log("Attempting board state reconstruction from visual elements");
+                  
+                  // 1. Try various piece selectors to support different Chess.com layouts
+                  const pieceSelectors = [
+                      'div.piece[class*="square-"]',
+                      'div[class*="piece-"]',
+                      'div[class*="square-"] > div[class*="piece"]',
+                      'div[class*="chess-piece"]',
+                      'div[class*="piece"][class*="square-"]',
+                      '.piece', 
+                      '[class*="piece"]',
+                      'img[src*="piece"]',
+                      // New Chess.com selectors
+                      'div[class*="piece_"] > svg',
+                      'div[class*="piece_"]',
+                      'chess-board div[class*="piece"]',
+                      'chess-board div[class*="square-"] div',
+                      // Generic selectors as last resort
+                      'chess-board *[style*="transform"]',
+                      'chess-board > div > div'
+                  ];
+
+                  let pieces = [];
+                  for (const selector of pieceSelectors) {
+                      const foundPieces = Array.from(boardElement.querySelectorAll(selector));
+                      if (foundPieces.length > 0) {
+                          pieces = foundPieces;
+                          console.log(`Found ${pieces.length} pieces using selector: ${selector}`);
+                          break;
                       }
                   }
-              }
 
-          // Method 4: Calculate FEN from piece positions
-          if (!fen) {
-              const pieces = boardElement.querySelectorAll('.piece');
-              if (pieces.length > 0) {
+                  // If we still didn't find pieces, try parent element just in case
+                  if (pieces.length === 0) {
+                      const parentElement = boardElement.parentElement;
+                      if (parentElement) {
+                          console.log("Trying parent element for board:", parentElement.tagName, parentElement.className);
+                          for (const selector of pieceSelectors) {
+                              const foundPieces = Array.from(parentElement.querySelectorAll(selector));
+                              if (foundPieces.length > 0) {
+                                  pieces = foundPieces;
+                                  console.log(`Found ${pieces.length} pieces using parent element and selector: ${selector}`);
+                                  break;
+                              }
+                          }
+                      }
+                  }
+
+                  if (pieces.length === 0) {
+                      console.error("No pieces found on the board");
+                      throw new Error("Could not find chess pieces on the board");
+                  }
+
                   const boardArray = Array(8).fill().map(() => Array(8).fill(''));
                   const boardRect = boardElement.getBoundingClientRect();
                   const squareSize = boardRect.width / 8;
+
+                  console.log(`Board dimensions: ${boardRect.width}x${boardRect.height}, square size: ${squareSize}`);
+                  
                   let successCount = 0;
                   let kingCount = { w: 0, b: 0 };
 
-                  pieces.forEach(piece => {
-                      const pieceClasses = piece.className.split(' ');
-                      const colorClass = pieceClasses.find(cls => cls === 'white' || cls === 'black');
-                      const typeClass = pieceClasses.find(cls => ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'].includes(cls));
-
-                      if (!colorClass || !typeClass) return;
-
-                      const color = colorClass === 'white' ? 'w' : 'b';
-                      let type = '';
-                      switch (typeClass) {
-                          case 'king': type = 'k'; break;
-                          case 'queen': type = 'q'; break;
-                          case 'rook': type = 'r'; break;
-                          case 'bishop': type = 'b'; break;
-                          case 'knight': type = 'n'; break;
-                          case 'pawn': type = 'p'; break;
-                      }
-
-                      const transform = piece.style.transform || '';
-                      const translateMatch = transform.match(/translate(?:3d)?\(\s*([^,]+)px,\s*([^,]+)px/);
-                      const matrixMatch = transform.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,([^,]+),([^,\)]+)/);
-
-                      let file = -1, rank = -1;
-
-                      if (translateMatch) {
-                          const x = parseFloat(translateMatch[1]);
-                          const y = parseFloat(translateMatch[2]);
-                          file = Math.round(x / squareSize);
-                          rank = Math.round(y / squareSize);
-                      } else if (matrixMatch) {
-                          const x = parseFloat(matrixMatch[1]);
-                          const y = parseFloat(matrixMatch[2]);
-                          file = Math.round(x / squareSize);
-                          rank = Math.round(y / squareSize);
-                      }
-
-                      if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
-                          const finalRank = orientation === 'black' ? 7 - rank : rank;
-                          const finalFile = orientation === 'black' ? 7 - file : file;
+                  pieces.forEach((piece, index) => {
+                      try {
+                          // Initialize position variables at the very beginning
+                          let fileIdx = -1;
+                          let rankIdx = -1;
+                          const classList = piece.className.split(' ');
                           
-                          if (boardArray[finalRank][finalFile] === '') {
-                              const pieceFenChar = color === 'w' ? type.toUpperCase() : type;
-                              boardArray[finalRank][finalFile] = pieceFenChar;
-                              successCount++;
-                              if (type === 'k') kingCount[color]++;
+                          // 1. Try standard Chess.com classes
+                          let pieceType = classList.find(cls => /^[bw][pnbrqk]$/.test(cls)) || 
+                                      classList.find(cls => /^piece-[bw][pnbrqk]$/.test(cls)) ||
+                                      classList.find(cls => /^chess-piece-[bw][pnbrqk]$/.test(cls)) ||
+                                      classList.find(cls => /^[bw][pnbrqk]-piece$/.test(cls));
+
+                          // 2. Try alternative format (white/black + king/queen/etc classes)
+                          let color, type;
+                          if (!pieceType) {
+                              // Try to find color in class names
+                              const colorClass = classList.find(cls => cls === 'white' || cls === 'black') ||
+                                               classList.find(cls => cls.includes('white')) || 
+                                               classList.find(cls => cls.includes('black'));
+                              
+                              // Try to find piece type in class names
+                              const typeClass = classList.find(cls => ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'].includes(cls)) ||
+                                              classList.find(cls => cls.includes('king')) || 
+                                              classList.find(cls => cls.includes('queen')) ||
+                                              classList.find(cls => cls.includes('rook')) ||
+                                              classList.find(cls => cls.includes('bishop')) ||
+                                              classList.find(cls => cls.includes('knight')) ||
+                                              classList.find(cls => cls.includes('pawn'));
+                              
+                              if (colorClass && typeClass) {
+                                  color = colorClass.includes('white') ? 'w' : 'b';
+                                  if (typeClass.includes('king')) type = 'k';
+                                  else if (typeClass.includes('queen')) type = 'q';
+                                  else if (typeClass.includes('rook')) type = 'r';
+                                  else if (typeClass.includes('bishop')) type = 'b';
+                                  else if (typeClass.includes('knight')) type = 'n';
+                                  else if (typeClass.includes('pawn')) type = 'p';
+                              }
                           }
+                          
+                          // 3. Try to extract from class names with piece_ prefix (new Chess.com format)
+                          if (!pieceType && !color && !type) {
+                              const pieceClass = classList.find(cls => cls.startsWith('piece_'));
+                              if (pieceClass) {
+                                  const parts = pieceClass.split('_');
+                                  if (parts.length >= 3) {
+                                      // Format might be like piece_color_type
+                                      color = parts[1].includes('w') ? 'w' : 'b';
+                                      const typePart = parts[2];
+                                      if (typePart.includes('k')) type = 'k';
+                                      else if (typePart.includes('q')) type = 'q';
+                                      else if (typePart.includes('r')) type = 'r';
+                                      else if (typePart.includes('b')) type = 'b';
+                                      else if (typePart.includes('n')) type = 'n';
+                                      else if (typePart.includes('p')) type = 'p';
+                                  }
+                              }
+                          }
+                          
+                          // 4. Try to extract from SVG use element if present
+                          if (!pieceType && !color && !type && piece.querySelector) {
+                              const svgUse = piece.querySelector('use');
+                              if (svgUse) {
+                                  const href = svgUse.getAttribute('href') || svgUse.getAttribute('xlink:href');
+                                  if (href) {
+                                      // Extract color and type from href like #wk or #bp
+                                      const match = href.match(/#([wb])([pnbrqk])/i);
+                                      if (match) {
+                                          color = match[1].toLowerCase();
+                                          type = match[2].toLowerCase();
+                                      }
+                                  }
+                              }
+                          }
+                          
+                          // Try to get position from class or transform
+                          // 1. Try square class
+                          const squareClass = classList.find(cls => /^square-\d{2}$/.test(cls)) ||
+                                      classList.find(cls => /^square-[a-h][1-8]$/.test(cls)) ||
+                                      classList.find(cls => /^[a-h][1-8]$/.test(cls));
+                          
+                          if (squareClass) {
+                              console.log(`Piece ${index} has square class: ${squareClass}`);
+                              if (squareClass.includes('-')) {
+                                  const sq = squareClass.split('-')[1];
+                                  if (sq.length === 2 && /^\d{2}$/.test(sq)) {
+                                      // Handle numeric coordinates (e.g., square-12)
+                                      fileIdx = parseInt(sq[0], 10) - 1;
+                                      rankIdx = 8 - parseInt(sq[1], 10);
+                                  } else {
+                                      // Handle algebraic coordinates (e.g., square-e4)
+                                      fileIdx = sq.charCodeAt(0) - 'a'.charCodeAt(0);
+                                      rankIdx = 8 - parseInt(sq[1], 10);
+                                  }
+                              } else {
+                                  // Handle direct algebraic notation (e.g., e4)
+                                  fileIdx = squareClass.charCodeAt(0) - 'a'.charCodeAt(0);
+                                  rankIdx = 8 - parseInt(squareClass[1], 10);
+                              }
+                          }
+                          
+                          // 2. If position not found, try transform style
+                          if (fileIdx < 0 || rankIdx < 0) {
+                              const transform = piece.style.transform || '';
+                              console.log(`Piece ${index} transform: ${transform}`);
+                              
+                              // Try translate
+                              const translateMatch = transform.match(/translate(?:3d)?\(\s*([^,]+)px,\s*([^,]+)px/);
+                              if (translateMatch) {
+                                  const x = parseFloat(translateMatch[1]);
+                                  const y = parseFloat(translateMatch[2]);
+                                  fileIdx = Math.round(x / squareSize);
+                                  rankIdx = Math.round(y / squareSize);
+                                  console.log(`Piece ${index} position from translate: [${fileIdx}, ${rankIdx}]`);
+                              } 
+                              // Try matrix
+                              else {
+                                  const matrixMatch = transform.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,([^,]+),([^,\)]+)/);
+                                  if (matrixMatch) {
+                                      const x = parseFloat(matrixMatch[1]);
+                                      const y = parseFloat(matrixMatch[2]);
+                                      fileIdx = Math.round(x / squareSize);
+                                      rankIdx = Math.round(y / squareSize);
+                                      console.log(`Piece ${index} position from matrix: [${fileIdx}, ${rankIdx}]`);
+                                  }
+                              }
+                              
+                              // Adjust for orientation if needed
+                              if (fileIdx >= 0 && rankIdx >= 0) {
+                                  if (orientation === 'black') {
+                                      fileIdx = 7 - fileIdx;
+                                      rankIdx = 7 - rankIdx;
+                                  }
+                              }
+                          }
+                          
+                          // Skip if position is invalid
+                          if (fileIdx < 0 || fileIdx > 7 || rankIdx < 0 || rankIdx > 7) {
+                              console.warn(`Piece ${index} position out of bounds: [${fileIdx}, ${rankIdx}]`);
+                              return;
+                          }
+                          
+                          // Get the FEN character
+                          let fenChar;
+                          if (pieceType) {
+                              // Method 1: from pieceType
+                              const pieceChar = pieceType.includes('-') ? pieceType.split('-').pop() : pieceType;
+                              fenChar = pieceChar[0] === 'w' ? pieceChar[1].toUpperCase() : pieceChar[1];
+                          } else if (color && type) {
+                              // Method 2: from separate color and type
+                              fenChar = color === 'w' ? type.toUpperCase() : type;
+                          } else {
+                              // No valid piece type found
+                              console.warn(`Piece ${index} has invalid type: ${piece.className}`);
+                              return;
+                          }
+                          
+                          // Place the piece on the board array
+                          boardArray[rankIdx][fileIdx] = fenChar;
+                          successCount++;
+                          if (fenChar.toLowerCase() === 'k') {
+                              kingCount[fenChar === 'K' ? 'w' : 'b']++;
+                          }
+                          
+                          console.log(`Placed ${fenChar} at [${fileIdx}, ${rankIdx}]`);
+                      } catch (err) {
+                          console.warn(`Error processing piece ${index}:`, err);
                       }
                   });
 
+                  console.log('Reconstructed board array:', JSON.stringify(boardArray));
+                  console.log('Pieces placed successfully:', successCount);
+                  console.log('King count:', kingCount);
+
+                  // Only generate FEN if we found at least some pieces and both kings
                   if (successCount > 0 && kingCount.w === 1 && kingCount.b === 1) {
-                      let fenPosition = '';
-                      for (let r = 0; r < 8; r++) {
-                          let emptyCount = 0;
-                          for (let f = 0; f < 8; f++) {
-                              if (boardArray[r][f] === '') {
-                                  emptyCount++;
-                              } else {
-                                  if (emptyCount > 0) fenPosition += emptyCount;
-                                  fenPosition += boardArray[r][f];
-                                  emptyCount = 0;
+                      // Convert board array to FEN notation
+                      let boardFen = boardArray.map(row => {
+                          let str = '';
+                          let empty = 0;
+                          for (const sq of row) {
+                              if (!sq) empty++;
+                              else {
+                                  if (empty) { str += empty; empty = 0; }
+                                  str += sq;
                               }
                           }
-                          if (emptyCount > 0) fenPosition += emptyCount;
-                          if (r < 7) fenPosition += '/';
-                      }
+                          if (empty) str += empty;
+                          return str;
+                      }).join('/');
 
-                      const turnIndicator = document.querySelector('.clock-player-turn');
-                      const currentTurn = turnIndicator && turnIndicator.classList.contains('white') ? 'w' : 'b';
-                      const calculatedFen = `${fenPosition} ${currentTurn} KQkq - 0 1`;
+                      // Add the rest of the FEN components
+                      const isWhiteToMove = !boardElement.classList.contains('flipped');
+                      fen = `${boardFen} ${isWhiteToMove ? 'w' : 'b'} KQkq - 0 1`;
                       
-                      if (isValidFENFormat(calculatedFen)) {
-                          fen = calculatedFen;
-                          console.log("Generated FEN from piece positions:", fen);
+                      if (window.isValidFENFormat(fen)) {
+                          console.log("Successfully reconstructed FEN:", fen);
+                      } else {
+                          console.error("Generated FEN failed validation:", fen);
+                          fen = null;
                       }
+                  } else {
+                      console.error("Incomplete board reconstruction, missing kings or too few pieces.");
                   }
+              } catch (e) {
+                  console.error("Visual board analysis failed:", e);
               }
           }
 
-          // If we still don't have a valid FEN, throw an error
           if (!fen) {
               throw new Error("Could not determine current board position");
           }
 
-          // Create temporary container for custom board
+          // Create a temporary off-screen container for rendering
           const tempContainer = document.createElement('div');
           tempContainer.id = 'vichar-temp-board-container';
           tempContainer.style.cssText = `
@@ -1383,7 +1626,7 @@ function captureChessBoard() {
 
       } catch (error) {
           console.error("Error in Chess.com board capture:", error);
-          throw new Error("Failed to capture Chess.com board: " + error.message);
+          throw error;
       }
   }
 

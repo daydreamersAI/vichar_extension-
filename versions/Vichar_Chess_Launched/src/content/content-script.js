@@ -1297,6 +1297,37 @@ function injectCustomCSS() {
     #sidebar-model-select:disabled { background-color: #e9ecef !important; cursor: not-allowed !important; }
 
 
+    /* Fix for model selector dropdown */
+    #sidebar-model-select {
+        width: 100% !important;
+        max-width: 100% !important;
+        z-index: 2147483647 !important; /* Maximum z-index to ensure dropdown appears above everything */
+        background-color: #ffffff !important;
+        color: #000000 !important; 
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        -webkit-appearance: menulist !important; /* Force native dropdown appearance */
+        appearance: menulist !important;
+    }
+    #sidebar-model-select option {
+        padding: 8px !important;
+        background-color: #f8f9fa !important; /* Lighter background */
+        color: #000000 !important; /* Darker text for better contrast */
+        font-size: 12px !important;
+        font-weight: 500 !important; /* Make text slightly bolder */
+        white-space: nowrap !important; /* Prevent text wrapping in dropdown */
+    }
+    /* Style for hover state on options */
+    #sidebar-model-select option:hover {
+        background-color: #4285f4 !important;
+        color: #ffffff !important;
+    }
+    /* Ensure the dropdown container is visible */
+    .sidebar-control-row {
+        position: relative !important;
+        overflow: visible !important; /* Allow dropdown to overflow */
+    }
+
     /* Chat Input Area */
     .sidebar-chat-input-area {
         padding: 10px 15px !important; border-top: 1px solid #ccc !important;
